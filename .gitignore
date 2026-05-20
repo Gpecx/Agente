@@ -1,0 +1,15 @@
+# Dependências
+node_modules/
+
+# Chaves de Segurança e Configurações (NUNCA SUBIR)
+.env
+serviceAccountKey.json
+
+# Código Compilado (O Portainer vai compilar lá na VPS)
+dist/
+
+# Logs de Erro
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log

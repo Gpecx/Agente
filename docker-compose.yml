@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  bot-moderador:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bot_moderador
+    restart: always
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    
+    # Boas práticas de DevOps: Controle de logs para evitar que 
+    # os logs do console lotem o disco rígido do seu servidor.
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
