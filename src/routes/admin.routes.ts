@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import AdminController from '../controllers/AdminController';
+import WebinarAdminController from '../webinars/controllers/WebinarAdminController';
 
 const router = Router();
 
@@ -38,5 +39,25 @@ router.get('/prompt', AdminController.getPrompt);
 
 // POST /admin/prompt → atualiza o prompt comportamental no Firestore
 router.post('/prompt', AdminController.updatePrompt);
+
+// ─── Módulo Bot Webinars ─────────────────────────────────────────────────────
+
+// POST /admin/webinars → cria/atualiza webinar
+router.post('/webinars', WebinarAdminController.upsertWebinar);
+
+// GET  /admin/webinars → lista webinars
+router.get('/webinars', WebinarAdminController.listWebinars);
+
+// POST /admin/webinars/:id/status → atualiza status (finished dispara a COLETA)
+router.post('/webinars/:id/status', WebinarAdminController.updateStatus);
+
+// POST   /admin/groups → libera grupo na whitelist
+router.post('/groups', WebinarAdminController.addGroup);
+
+// GET    /admin/groups → lista grupos liberados
+router.get('/groups', WebinarAdminController.listGroups);
+
+// DELETE /admin/groups/:groupJid → remove grupo da whitelist
+router.delete('/groups/:groupJid', WebinarAdminController.removeGroup);
 
 export default router;

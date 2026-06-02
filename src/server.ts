@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import { initFirebase } from './config/firebase';
 import webhookRoutes from './routes/webhook.routes';
 import adminRoutes from './routes/admin.routes';
+import webinarScheduler from './webinars/services/WebinarSchedulerService';
 
 // Load environment variables from .env file
 dotenv.config();
@@ -50,4 +51,7 @@ app.use('/api/admin', adminRoutes);
 
 app.listen(port, () => {
   console.log(`🚀 Webhook server is running on port ${port}`);
+
+  // Inicializa o scheduler do módulo de Webinars (crons de teaser/lembrete/coleta/relatório).
+  webinarScheduler.start();
 });

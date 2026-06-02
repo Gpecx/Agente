@@ -102,16 +102,21 @@ class EvolutionApiService {
   /**
    * Deleta uma mensagem específica na instância da Evolution.
    */
-  public async deleteMessage(instance: string, remoteJid: string, messageId: string, fromMe: boolean): Promise<void> {
-    const endpoint = `/chat/deleteMessage/${instance}`;
-    const body = {
-      number: remoteJid,
-      messageId,
+  public async deleteMessage(instance: string, remoteJid: string, messageId: string, fromMe: boolean, participant?: string): Promise<void> {
+    const endpoint = `/chat/deleteMessageForEveryone/${instance}`;
+    const body: Record<string, any> = {
+      remoteJid,
+      id: messageId,
       fromMe,
     };
 
+    // Para deletar mensagens de outras pessoas em grupos, a Evolution exige o 'participant'.
+    if (participant) {
+      body.participant = participant;
+    }
+
     console.log(`🗑️ Deletando mensagem ${messageId} na conversa ${remoteJid} (Instância: ${instance})`);
-    await this.request(endpoint, 'POST', body);
+    await this.request(endpoint, 'DELETE', body);
   }
 
   /**
@@ -126,6 +131,86 @@ class EvolutionApiService {
     };
 
     console.log(`💬 Enviando aviso/mensagem com menção para ${mentionedJid} no grupo ${remoteJid}`);
+    await this.request(endpoint, 'POST', body);
+  }
+
+  /**
+   * Envia uma mensagem de texto simples (sem menção).
+   * Usada em DMs (lembretes, boas-vindas, entrega de e-book/certificado).
+   */
+  public async sendText(instance: string, number: string, text: string): Promise<void> {
+    const endpoint = `/message/sendText/${instance}`;
+    const body = { number, text };
+    await this.request(endpoint, 'POST', body);
+  }
+
+  /**
+   * Envia uma reação (emoji) a uma mensagem específica.
+   * (Endpoint de reação da Evolution API / Baileys.)
+   */
+  public async sendReaction(
+    instance: string,
+    remoteJid: string,
+    messageId: string,
+    fromMe: boolean,
+    emoji: string
+  ): Promise<void> {
+    const endpoint = `/message/sendReaction/${instance}`;
+    const body = {
+      key: { remoteJid, fromMe, id: messageId },
+      reaction: emoji,
+    };
+    await this.request(endpoint, 'POST', body);
+  }
+
+  /**
+   * Envia uma enquete (poll). Rastreamento de votos é best-effort (spec §2.5).
+   */
+  public async sendPoll(
+    instance: string,
+    number: string,
+    name: string,
+    values: string[],
+    selectableCount = 1
+  ): Promise<void> {
+    const endpoint = `/message/sendPoll/${instance}`;
+    const body = { number, name, selectableCount, values };
+    console.log(`📊 Enviando enquete "${name}" para ${number}`);
+    await this.request(endpoint, 'POST', body);
+  }
+
+  /**
+   * Atualiza a descrição (subject/description) do grupo.
+   * Usado por `atualizarInfoFixada()` como substituto do "pin" (spec §2.6).
+   */
+  public async updateGroupDescription(
+    instance: string,
+    groupJid: string,
+    description: string
+  ): Promise<void> {
+    const endpoint = `/group/updateGroupDescription/${instance}`;
+    const body = { groupJid, description };
+    console.log(`📌 Atualizando descrição do grupo ${groupJid}`);
+    await this.request(endpoint, 'POST', body);
+  }
+
+  /**
+   * Envia um documento/arquivo via URL ou base64 (usado para entregar o certificado PDF).
+   */
+  public async sendMedia(
+    instance: string,
+    number: string,
+    options: { mediatype: 'document' | 'image'; media: string; fileName?: string; caption?: string }
+  ): Promise<void> {
+    const endpoint = `/message/sendMedia/${instance}`;
+    const body = {
+      number,
+      mediatype: options.mediatype,
+      media: options.media,
+      fileName: options.fileName,
+      caption: options.caption,
+    };
+    console.log(`📎 Enviando mídia (${options.mediatype}) para ${number}`);
     await this.request(endpoint, 'POST', body);
   }
 

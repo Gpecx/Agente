@@ -16,8 +16,9 @@ const MAX_STRIKES = 3;
 class ModerationService {
   /**
    * Método principal que recebe o payload do webhook e aplica as regras de moderação.
+   * @returns true se a mensagem foi punida (apagada), false caso contrário.
    */
-  public async processMessage(payload: EvolutionWebhookPayload): Promise<void> {
+  public async processMessage(payload: EvolutionWebhookPayload): Promise<boolean> {
     try {
       // 1. Extração segura dos campos necessários
       const messageText = this.extractMessageText(payload);
@@ -28,7 +29,7 @@ class ModerationService {
       // Guard clause: ignora se faltar dados essenciais para a moderação
       if (!messageText || !remoteJid || !participant || !messageId) {
         console.log('⚠️ [ModerationService] Mensagem ignorada por dados insuficientes.');
-        return;
+        return false;
       }
 
       let isInfringing = false;
@@ -54,7 +55,7 @@ class ModerationService {
       }
 
       if (!isInfringing) {
-        return; // Mensagem limpa (passou nas 2 camadas), encerra o fluxo com sucesso
+        return false; // Mensagem limpa (passou nas 2 camadas), encerra o fluxo com sucesso
       }
 
       console.log(`🚨 [ModerationService] Infração detectada (${infractionType}) de ${participant} no grupo ${remoteJid}`);
@@ -66,17 +67,19 @@ class ModerationService {
       await auditRepository.logInfraction(remoteJid, participant, messageText, infractionType);
 
       // 4. Deleta a mensagem infratora (independente do strikeCount)
-      await evolutionApiService.deleteMessage(payload.instance, remoteJid, messageId, payload.data.key!.fromMe);
+      // Passa o 'participant' para permitir deletar a mensagem de terceiros em grupos.
+      await evolutionApiService.deleteMessage(payload.instance, remoteJid, messageId, payload.data.key!.fromMe, participant);
 
       // 5. Aplica a punição baseada no total de strikes
       if (strikeCount < MAX_STRIKES) {
-        // Avisa o usuário com uma menção direta
+        // Avisa o infrator no privado (DM), evitando expor a punição no grupo.
         const warningText =
-          `⚠️ @${participant.replace(/@.+/, '')} — Sua mensagem foi removida por conter ${infractionType}.\n` +
+          `⚠️ *Aviso de Moderação*\n\n` +
+          `Sua mensagem foi removida do grupo por conter: *${infractionType}*.\n` +
           `📋 Advertências: *${strikeCount}/${MAX_STRIKES}*.\n` +
           `⚡ Ao atingir ${MAX_STRIKES} advertências, você será removido do grupo.`;
 
-        await evolutionApiService.sendTextWithMention(payload.instance, remoteJid, warningText, participant);
+        await evolutionApiService.sendText(payload.instance, participant, warningText);
       } else {
         // Strike limite atingido: kick do participante
         console.log(`🔨 [ModerationService] Strike máximo atingido! Removendo ${participant} do grupo ${remoteJid}...`);
@@ -96,10 +99,23 @@ class ModerationService {
         // Zera a ficha do usuário após o kick
         await strikeRepository.resetStrikes(remoteJid, participant);
       }
+
+      return true; // mensagem foi punida (apagada)
     } catch (error) {
       console.error('❌ [ModerationService] Erro não esperado durante processamento de mensagem:', error);
       // Falha silenciosa para não quebrar a esteira de webhooks
+      return false;
     }
+  }
+
+  /**
+   * Extrai o texto de uma mensagem lidando com as variações estruturais do WhatsApp.
+   * O WhatsApp pode enviar a mensagem em diferentes nós dependendo do tipo.
+   *
+   * Exposto publicamente para reuso pelo módulo de webinars (evita re-extrair).
+   */
+  public extractText(payload: EvolutionWebhookPayload): string | null {
+    return this.extractMessageText(payload);
   }
 
   /**

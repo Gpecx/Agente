@@ -46,6 +46,31 @@ class GroupConfigRepository {
   }
 
   /**
+   * Adiciona um grupo à whitelist (coleção `allowed_groups`) e atualiza o cache
+   * imediatamente, para a moderação passar a valer sem esperar o sync de 5 min.
+   */
+  public async addGroup(remoteJid: string): Promise<void> {
+    await this.db.collection('allowed_groups').doc(remoteJid).set({
+      addedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    this.allowedGroupsCache.add(remoteJid);
+    console.log(`✅ [GroupConfig] Grupo ${remoteJid} liberado na whitelist.`);
+  }
+
+  /** Remove um grupo da whitelist e atualiza o cache imediatamente. */
+  public async removeGroup(remoteJid: string): Promise<void> {
+    await this.db.collection('allowed_groups').doc(remoteJid).delete();
+    this.allowedGroupsCache.delete(remoteJid);
+    console.log(`🗑️ [GroupConfig] Grupo ${remoteJid} removido da whitelist.`);
+  }
+
+  /** Lista os grupos atualmente liberados (lê do Firestore, fonte da verdade). */
+  public async listGroups(): Promise<string[]> {
+    const snapshot = await this.db.collection('allowed_groups').get();
+    return snapshot.docs.map((doc) => doc.id);
+  }
+
+  /**
    * Avalia em O(1) se o grupo consta na Whitelist.
    * Método chamado em 100% dos webhooks, precisa ser ultrarrápido.
    */

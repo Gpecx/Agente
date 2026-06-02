@@ -4,6 +4,7 @@ import moderationService from '../services/ModerationService';
 import participantService from '../services/ParticipantService';
 import rateLimiter from '../utils/RateLimiter';
 import groupConfigRepository from '../repositories/GroupConfigRepository';
+import webinarOrchestrator from '../webinars/services/WebinarOrchestrator';
 
 class WebhookController {
   /**
@@ -87,8 +88,13 @@ class WebhookController {
 
     console.log(`📨 [messages.upsert] Message received in chat: ${remoteJid} from participant: ${participant}`);
 
-    // Delega todo o fluxo de moderação para o ModerationService
-    await moderationService.processMessage(payload);
+    // 1) Moderação-base existente (links/palavrão -> strikes/kick).
+    const baseHandled = await moderationService.processMessage(payload);
+
+    // 2) Módulo de Webinars (reações/opt-in, comandos, mute simulado).
+    //    Reusa o texto já extraído pela moderação-base.
+    const texto = moderationService.extractText(payload);
+    await webinarOrchestrator.onMessage(payload, texto, baseHandled);
   }
 
   /**
@@ -98,10 +104,15 @@ class WebhookController {
   private async handleGroupParticipantsUpdate(payload: EvolutionWebhookPayload): Promise<void> {
     console.log(`👥 [group-participants.update] Participants changed event triggered for: ${payload.instance}`);
     
-    // "Fire and forget": delegamos para o serviço rodar em background e liberamos 
+    // "Fire and forget": delegamos para o serviço rodar em background e liberamos
     // imediatamente o Express para responder 200 à Evolution API.
     participantService.handleParticipantUpdate(payload).catch(error => {
       console.error('❌ [WebhookController] Falha silenciosa no ParticipantService:', error);
+    });
+
+    // Módulo de Webinars: boas-vindas + CTA de inscrição (respeitando anti-ban).
+    webinarOrchestrator.onParticipantUpdate(payload).catch(error => {
+      console.error('❌ [WebhookController] Falha silenciosa no WebinarOrchestrator:', error);
     });
   }
 }
