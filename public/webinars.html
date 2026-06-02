@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webinars | IA Moderadora</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>tailwind.config = { darkMode: 'class' }</script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen p-4 md:p-8">
+
+    <div class="max-w-4xl mx-auto space-y-6">
+
+        <header>
+            <h1 class="text-3xl font-bold text-emerald-400">🎓 Painel de Webinars</h1>
+            <p class="text-gray-400">Cadastre, edite e acompanhe os webinars. Tudo conectado ao banco (Firestore).</p>
+        </header>
+
+        <!-- Chave admin -->
+        <section class="bg-gray-800 rounded-xl p-5 border border-gray-700">
+            <label class="block text-sm font-medium text-gray-300 mb-2">Chave de Administração (ADMIN_API_KEY)</label>
+            <div class="flex gap-2">
+                <input type="password" id="adminKey" class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:border-emerald-500" placeholder="Cole sua senha mestre...">
+                <button onclick="salvarChave()" class="bg-gray-600 hover:bg-gray-500 px-4 py-2 rounded-lg font-medium">Salvar chave</button>
+                <button onclick="carregarTudo()" class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg font-bold">↻ Carregar</button>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">A chave fica salva só no seu navegador (localStorage).</p>
+        </section>
+
+        <!-- Formulário criar/editar -->
+        <section class="bg-gray-800 rounded-xl p-5 border border-gray-700">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xl font-bold text-emerald-400" id="formTitulo">➕ Novo Webinar</h2>
+                <button onclick="limparForm()" class="text-sm text-gray-400 hover:text-gray-200 underline">limpar formulário</button>
+            </div>
+            <input type="hidden" id="webinarId">
+            <div class="grid md:grid-cols-2 gap-4">
+                <div class="md:col-span-2">
+                    <label class="block text-sm text-gray-300 mb-1">Tema *</label>
+                    <input id="tema" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:border-emerald-500" placeholder="Ex.: Como vender no WhatsApp">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Data e hora *</label>
+                    <input type="datetime-local" id="dataHora" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:border-emerald-500">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Palestrante *</label>
+                    <input id="palestrante" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:border-emerald-500" placeholder="Ex.: Fred Motta">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Link da sala</label>
+                    <input id="linkSala" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:border-emerald-500" placeholder="https://zoom.us/j/...">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1">Status</label>
+                    <select id="status" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:border-emerald-500">
+                        <option value="scheduled">scheduled (agendado)</option>
+                        <option value="live">live (ao vivo)</option>
+                        <option value="finished">finished (encerrado → dispara coleta)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="flex items-center justify-between mt-5">
+                <span id="statusForm" class="text-sm font-medium opacity-0 transition-opacity"></span>
+                <button onclick="salvarWebinar()" class="bg-emerald-600 hover:bg-emerald-500 px-6 py-2 rounded-lg font-bold shadow-lg active:scale-95 transition-transform">💾 Salvar</button>
+            </div>
+        </section>
+
+        <!-- Lista de webinars -->
+        <section class="bg-gray-800 rounded-xl p-5 border border-gray-700">
+            <h2 class="text-xl font-bold text-emerald-400 mb-4">📅 Webinars cadastrados</h2>
+            <div id="listaWebinars" class="space-y-3"><p class="text-gray-500 text-sm">Clique em "Carregar".</p></div>
+        </section>
+
+        <!-- Grupos -->
+        <section class="bg-gray-800 rounded-xl p-5 border border-gray-700">
+            <h2 class="text-xl font-bold text-emerald-400 mb-4">👥 Grupos liberados (whitelist)</h2>
+            <p class="text-gray-400 text-sm mb-3">Sem liberar o grupo aqui, o bot ignora as mensagens dele.</p>
+            <div class="flex gap-2 mb-4">
+                <input id="novoGrupo" class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:border-emerald-500" placeholder="120363...@g.us">
+                <button onclick="adicionarGrupo()" class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg font-bold">+ Liberar</button>
+            </div>
+            <div id="listaGrupos" class="space-y-2"><p class="text-gray-500 text-sm">Clique em "Carregar".</p></div>
+        </section>
+
+        <p id="statusGlobal" class="text-center text-sm font-medium opacity-0 transition-opacity"></p>
+    </div>
+
+<script>
+    const $ = (id) => document.getElementById(id);
+
+    function getKey() { return $('adminKey').value.trim(); }
+    function headers() { return { 'Authorization': `Bearer ${getKey()}`, 'Content-Type': 'application/json' }; }
+
+    function flash(elId, msg, isError = false) {
+        const el = $(elId);
+        el.textContent = msg;
+        el.className = `text-sm font-medium transition-opacity opacity-100 ${isError ? 'text-red-400' : 'text-emerald-400'}`;
+        setTimeout(() => el.style.opacity = '0', 4000);
+    }
+    const toast = (m, e=false) => flash('statusGlobal', m, e);
+
+    function salvarChave() {
+        localStorage.setItem('adminKey', getKey());
+        toast('🔑 Chave salva no navegador.');
+    }
+
+    // ---- Webinars ----
+    function limparForm() {
+        $('webinarId').value = '';
+        $('tema').value = ''; $('dataHora').value = '';
+        $('palestrante').value = ''; $('linkSala').value = '';
+        $('status').value = 'scheduled';
+        $('formTitulo').textContent = '➕ Novo Webinar';
+    }
+
+    async function salvarWebinar() {
+        if (!getKey()) return flash('statusForm', '⚠️ Informe a chave admin.', true);
+        if (!$('tema').value || !$('dataHora').value || !$('palestrante').value)
+            return flash('statusForm', '⚠️ Preencha tema, data e palestrante.', true);
+
+        const body = {
+            tema: $('tema').value.trim(),
+            // datetime-local é hora local -> converte p/ ISO 8601 (UTC)
+            dataHora: new Date($('dataHora').value).toISOString(),
+            palestrante: $('palestrante').value.trim(),
+            linkSala: $('linkSala').value.trim(),
+            status: $('status').value,
+        };
+        const id = $('webinarId').value;
+        if (id) body.id = id;
+
+        try {
+            const res = await fetch('/api/admin/webinars', { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+            if (!res.ok) throw new Error((await res.json()).error || 'falha ao salvar');
+            flash('statusForm', '✅ Webinar salvo!');
+            limparForm();
+            listarWebinars();
+        } catch (e) { flash('statusForm', `❌ ${e.message}`, true); }
+    }
+
+    async function listarWebinars() {
+        const cont = $('listaWebinars');
+        try {
+            const res = await fetch('/api/admin/webinars', { headers: headers() });
+            if (!res.ok) throw new Error('acesso negado (chave?)');
+            const { webinars = [] } = await res.json();
+            if (!webinars.length) { cont.innerHTML = '<p class="text-gray-500 text-sm">Nenhum webinar cadastrado.</p>'; return; }
+
+            const cores = { scheduled: 'bg-blue-600', live: 'bg-red-600', finished: 'bg-gray-600' };
+            cont.innerHTML = webinars.map(w => {
+                const data = new Date(w.dataHora).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+                const cor = cores[w.status] || 'bg-gray-600';
+                const wJson = encodeURIComponent(JSON.stringify(w));
+                return `
+                <div class="bg-gray-700/50 border border-gray-600 rounded-lg p-4">
+                    <div class="flex items-start justify-between gap-3">
+                        <div>
+                            <p class="font-bold text-lg">${w.tema}</p>
+                            <p class="text-sm text-gray-300">🗓️ ${data} · 🎤 ${w.palestrante}</p>
+                            ${w.linkSala ? `<a href="${w.linkSala}" target="_blank" class="text-sm text-emerald-400 underline break-all">${w.linkSala}</a>` : ''}
+                            <p class="text-xs text-gray-500 mt-1">id: ${w.id}</p>
+                        </div>
+                        <span class="text-xs px-2 py-1 rounded ${cor} whitespace-nowrap">${w.status}</span>
+                    </div>
+                    <div class="flex gap-2 mt-3">
+                        <button onclick="editarWebinar('${wJson}')" class="text-sm bg-gray-600 hover:bg-gray-500 px-3 py-1 rounded">✏️ Editar</button>
+                        ${w.status !== 'finished' ? `<button onclick="marcarFinalizado('${w.id}')" class="text-sm bg-amber-600 hover:bg-amber-500 px-3 py-1 rounded">🏁 Marcar finalizado</button>` : ''}
+                    </div>
+                </div>`;
+            }).join('');
+        } catch (e) { cont.innerHTML = `<p class="text-red-400 text-sm">❌ ${e.message}</p>`; }
+    }
+
+    function editarWebinar(wJson) {
+        const w = JSON.parse(decodeURIComponent(wJson));
+        $('webinarId').value = w.id;
+        $('tema').value = w.tema;
+        // ISO -> datetime-local (hora local, sem segundos/fuso)
+        const d = new Date(w.dataHora);
+        const pad = (n) => String(n).padStart(2, '0');
+        $('dataHora').value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        $('palestrante').value = w.palestrante;
+        $('linkSala').value = w.linkSala || '';
+        $('status').value = w.status;
+        $('formTitulo').textContent = '✏️ Editando webinar';
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    async function marcarFinalizado(id) {
+        if (!confirm('Marcar este webinar como FINALIZADO? Isso dispara a fase de coleta (presença, e-book, etc.).')) return;
+        try {
+            const res = await fetch(`/api/admin/webinars/${id}/status`, { method: 'POST', headers: headers(), body: JSON.stringify({ status: 'finished' }) });
+            if (!res.ok) throw new Error((await res.json()).error || 'falha');
+            toast('🏁 Webinar finalizado.');
+            listarWebinars();
+        } catch (e) { toast(`❌ ${e.message}`, true); }
+    }
+
+    // ---- Grupos ----
+    async function adicionarGrupo() {
+        const groupJid = $('novoGrupo').value.trim();
+        if (!groupJid.endsWith('@g.us')) return toast('⚠️ O JID deve terminar em @g.us', true);
+        try {
+            const res = await fetch('/api/admin/groups', { method: 'POST', headers: headers(), body: JSON.stringify({ groupJid }) });
+            if (!res.ok) throw new Error((await res.json()).error || 'falha');
+            $('novoGrupo').value = '';
+            toast('✅ Grupo liberado.');
+            listarGrupos();
+        } catch (e) { toast(`❌ ${e.message}`, true); }
+    }
+
+    async function listarGrupos() {
+        const cont = $('listaGrupos');
+        try {
+            const res = await fetch('/api/admin/groups', { headers: headers() });
+            if (!res.ok) throw new Error('acesso negado (chave?)');
+            const { groups = [] } = await res.json();
+            if (!groups.length) { cont.innerHTML = '<p class="text-gray-500 text-sm">Nenhum grupo liberado.</p>'; return; }
+            cont.innerHTML = groups.map(g => `
+                <div class="flex items-center justify-between bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2">
+                    <span class="font-mono text-sm break-all">${g}</span>
+                    <button onclick="removerGrupo('${g}')" class="text-sm text-red-400 hover:text-red-300 ml-2">remover</button>
+                </div>`).join('');
+        } catch (e) { cont.innerHTML = `<p class="text-red-400 text-sm">❌ ${e.message}</p>`; }
+    }
+
+    async function removerGrupo(groupJid) {
+        if (!confirm(`Remover ${groupJid} da whitelist?`)) return;
+        try {
+            const res = await fetch(`/api/admin/groups/${encodeURIComponent(groupJid)}`, { method: 'DELETE', headers: headers() });
+            if (!res.ok) throw new Error((await res.json()).error || 'falha');
+            toast('🗑️ Grupo removido.');
+            listarGrupos();
+        } catch (e) { toast(`❌ ${e.message}`, true); }
+    }
+
+    function carregarTudo() {
+        if (!getKey()) return toast('⚠️ Informe a chave admin.', true);
+        listarWebinars();
+        listarGrupos();
+    }
+
+    // boot: recupera chave salva e carrega
+    window.addEventListener('DOMContentLoaded', () => {
+        const saved = localStorage.getItem('adminKey');
+        if (saved) { $('adminKey').value = saved; carregarTudo(); }
+    });
+</script>
+</body>
+</html>
