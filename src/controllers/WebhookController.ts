@@ -12,6 +12,23 @@ class WebhookController {
    */
   public handleEvolutionWebhook = async (req: Request, res: Response): Promise<void> => {
     try {
+      // 0. Debug opcional: loga TODO webhook recebido (ative com DEBUG_WEBHOOK=true).
+      //    Útil pra ver chegada de mensagens e o motivo de quedas de conexão.
+      if (process.env.DEBUG_WEBHOOK === 'true') {
+        const ev = req.body?.event;
+        const st = req.body?.data?.state || req.body?.data?.connection;
+        const code = req.body?.data?.lastDisconnect?.error?.output?.statusCode
+          ?? req.body?.data?.statusReason;
+        const rj = req.body?.data?.key?.remoteJid;
+        const fm = req.body?.data?.key?.fromMe;
+        console.log(
+          `📥 [webhook] event=${ev}` +
+          (st ? ` state=${st}` : '') +
+          (code !== undefined ? ` code=${code}` : '') +
+          (rj ? ` from=${rj} fromMe=${fm}` : '')
+        );
+      }
+
       // 1. Authorization Validation
       const authHeader = this.getHeaderValue(req, 'x-webhook-secret') || this.getHeaderValue(req, 'authorization');
       const expectedSecret = process.env.WEBHOOK_SECRET;
