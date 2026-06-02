@@ -41,7 +41,21 @@ class GeminiModerationService {
       console.warn('⚠️ [GeminiModerationService] GCP_PROJECT_ID não configurado. Vertex AI pode falhar.');
     }
 
-    this.vertexAi = new VertexAI({ project, location });
+    // Reusa a mesma service account do Firebase para autenticar no Vertex AI.
+    // Sem isto, o SDK cai no ADC (Application Default Credentials), que não
+    // existe no container -> "Could not load the default credentials".
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+    const googleAuthOptions =
+      clientEmail && privateKey
+        ? { credentials: { client_email: clientEmail, private_key: privateKey } }
+        : undefined;
+
+    if (!googleAuthOptions) {
+      console.warn('⚠️ [GeminiModerationService] Credenciais GCP ausentes (FIREBASE_CLIENT_EMAIL/PRIVATE_KEY). Vertex AI vai falhar.');
+    }
+
+    this.vertexAi = new VertexAI({ project, location, googleAuthOptions });
 
     this.model = this.vertexAi.preview.getGenerativeModel({
       model: 'gemini-1.5-flash',
