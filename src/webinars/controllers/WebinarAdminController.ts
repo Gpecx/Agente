@@ -113,6 +113,23 @@ class WebinarAdminController {
     }
   };
 
+  /** DELETE /api/admin/webinars/:id — remove um webinar. */
+  public deleteWebinar = async (req: Request, res: Response): Promise<void> => {
+    const { id } = req.params;
+    try {
+      const existente = await webinarRepository.getById(id);
+      if (!existente) {
+        res.status(404).json({ error: `Webinar ${id} não encontrado.` });
+        return;
+      }
+      await webinarRepository.delete(id);
+      res.status(200).json({ message: `Webinar ${id} removido com sucesso.` });
+    } catch (error) {
+      console.error('❌ [WebinarAdminController] Erro ao remover webinar:', error);
+      res.status(500).json({ error: 'Erro interno ao remover o webinar.' });
+    }
+  };
+
   // ─── Whitelist de grupos ────────────────────────────────────────────────────
 
   /**

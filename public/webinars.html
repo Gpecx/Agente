@@ -166,6 +166,7 @@
                     <div class="flex gap-2 mt-3">
                         <button onclick="editarWebinar('${wJson}')" class="text-sm bg-gray-600 hover:bg-gray-500 px-3 py-1 rounded">✏️ Editar</button>
                         ${w.status !== 'finished' ? `<button onclick="marcarFinalizado('${w.id}')" class="text-sm bg-amber-600 hover:bg-amber-500 px-3 py-1 rounded">🏁 Marcar finalizado</button>` : ''}
+                        <button onclick="deletarWebinar('${w.id}')" class="text-sm bg-red-700 hover:bg-red-600 px-3 py-1 rounded">🗑️ Excluir</button>
                     </div>
                 </div>`;
             }).join('');
@@ -193,6 +194,16 @@
             const res = await fetch(`/api/admin/webinars/${id}/status`, { method: 'POST', headers: headers(), body: JSON.stringify({ status: 'finished' }) });
             if (!res.ok) throw new Error((await res.json()).error || 'falha');
             toast('🏁 Webinar finalizado.');
+            listarWebinars();
+        } catch (e) { toast(`❌ ${e.message}`, true); }
+    }
+
+    async function deletarWebinar(id) {
+        if (!confirm('Excluir este webinar permanentemente? Esta ação não pode ser desfeita.')) return;
+        try {
+            const res = await fetch(`/api/admin/webinars/${encodeURIComponent(id)}`, { method: 'DELETE', headers: headers() });
+            if (!res.ok) throw new Error((await res.json()).error || 'falha');
+            toast('🗑️ Webinar excluído.');
             listarWebinars();
         } catch (e) { toast(`❌ ${e.message}`, true); }
     }

@@ -97,6 +97,15 @@ class WebinarRepository {
     }
   }
 
+  /** Remove um webinar da coleção. */
+  async delete(id: string): Promise<void> {
+    try {
+      await this.col.doc(id).delete();
+    } catch (error) {
+      console.error(`❌ [WebinarRepository] Erro ao deletar webinar ${id}:`, error);
+    }
+  }
+
   /** Helper para seed/admin: cria ou atualiza um webinar. */
   async upsert(webinar: Webinar): Promise<void> {
     try {

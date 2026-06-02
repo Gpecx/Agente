@@ -51,6 +51,9 @@ router.get('/webinars', WebinarAdminController.listWebinars);
 // POST /admin/webinars/:id/status → atualiza status (finished dispara a COLETA)
 router.post('/webinars/:id/status', WebinarAdminController.updateStatus);
 
+// DELETE /admin/webinars/:id → remove o webinar
+router.delete('/webinars/:id', WebinarAdminController.deleteWebinar);
+
 // POST   /admin/groups → libera grupo na whitelist
 router.post('/groups', WebinarAdminController.addGroup);
 
