@@ -60,7 +60,7 @@ class GeminiModerationService {
     this.model = this.vertexAi.preview.getGenerativeModel({
       // gemini-1.5-* foi descontinuado no Vertex AI. Usa modelo atual,
       // sobrescrevível via env GEMINI_MODEL.
-      model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
+      model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
       generationConfig: {
         temperature: 0.1,
         responseMimeType: 'application/json',
