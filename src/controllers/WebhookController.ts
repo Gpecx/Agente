@@ -4,6 +4,8 @@ import moderationService from '../services/ModerationService';
 import participantService from '../services/ParticipantService';
 import rateLimiter from '../utils/RateLimiter';
 import groupConfigRepository from '../repositories/GroupConfigRepository';
+import messageArchiveRepository from '../repositories/MessageArchiveRepository';
+import summaryNoticeService from '../services/SummaryNoticeService';
 import webinarOrchestrator from '../webinars/services/WebinarOrchestrator';
 import triagemService from '../triagem/services/TriagemService';
 
@@ -135,6 +137,23 @@ class WebhookController {
     //    Reusa o texto já extraído pela moderação-base.
     const texto = moderationService.extractText(payload);
     await webinarOrchestrator.onMessage(payload, texto, baseHandled);
+
+    // 3) Arquiva a mensagem de texto para o resumo mensal (fire-and-forget).
+    //    Só grupos (g.us); fromMe/flood/whitelist já foram filtrados acima.
+    //    Mensagens já apagadas pela moderação (baseHandled) não são arquivadas.
+    if (texto && !baseHandled && remoteJid?.endsWith('@g.us')) {
+      void messageArchiveRepository.archive({
+        groupJid: remoteJid,
+        participantJid: participant || remoteJid,
+        pushName: payload.data?.pushName,
+        text: texto,
+        messageId: payload.data?.key?.id || '',
+        messageTimestamp: payload.data?.messageTimestamp,
+      });
+
+      // Aviso de transparência (LGPD): postado UMA vez por grupo.
+      void summaryNoticeService.ensureNotice(payload.instance, remoteJid);
+    }
   }
 
   /**

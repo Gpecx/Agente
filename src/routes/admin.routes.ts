@@ -50,6 +50,8 @@ router.post('/triagem/config', AdminController.updateTriagemConfig);
 
 // GET  /admin/triagem/candidato/:jid → estado + transcrição de um candidato
 router.get('/triagem/candidato/:jid', AdminController.getTriagemCandidate);
+// POST /admin/summary → gera (e por padrão envia) o resumo mensal de um grupo
+router.post('/summary', AdminController.generateSummary);
 
 // ─── Módulo Bot Webinars ─────────────────────────────────────────────────────
 

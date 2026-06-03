@@ -6,6 +6,7 @@ import { initFirebase } from './config/firebase';
 import webhookRoutes from './routes/webhook.routes';
 import adminRoutes from './routes/admin.routes';
 import webinarScheduler from './webinars/services/WebinarSchedulerService';
+import monthlySummaryScheduler from './services/MonthlySummaryScheduler';
 
 // Load environment variables from .env file
 dotenv.config();
@@ -54,4 +55,7 @@ app.listen(port, () => {
 
   // Inicializa o scheduler do módulo de Webinars (crons de teaser/lembrete/coleta/relatório).
   webinarScheduler.start();
+
+  // Inicializa o scheduler do resumo mensal das conversas (dia 1 de cada mês).
+  monthlySummaryScheduler.start();
 });
