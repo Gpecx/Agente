@@ -7,6 +7,7 @@ import groupConfigRepository from '../repositories/GroupConfigRepository';
 import messageArchiveRepository from '../repositories/MessageArchiveRepository';
 import summaryNoticeService from '../services/SummaryNoticeService';
 import webinarOrchestrator from '../webinars/services/WebinarOrchestrator';
+import triagemService from '../triagem/services/TriagemService';
 
 class WebhookController {
   /**
@@ -53,9 +54,31 @@ class WebhookController {
         return;
       }
 
+      // 2.5 Triagem de entrada por DM (intake de novos membros).
+      //     Roda ANTES da whitelist de grupos: mensagens individuais (não-grupo)
+      //     nunca estão na whitelist e seriam descartadas. Gated por TRIAGEM_ENABLED.
+      //     O rate-limiter (passo 2) já protege contra flood/custo.
+      const dmJid = payload.data?.key?.remoteJid;
+      if (
+        process.env.TRIAGEM_ENABLED === 'true' &&
+        payload.event === 'messages.upsert' &&
+        !payload.data?.key?.fromMe &&
+        dmJid?.endsWith('@s.whatsapp.net')
+      ) {
+        const textoDm = moderationService.extractText(payload);
+        if (textoDm) {
+          // Fire-and-forget: libera o Express para responder 200 imediatamente.
+          triagemService
+            .handleDM(payload.instance, dmJid, textoDm, payload.data?.pushName || '')
+            .catch((error) => console.error('❌ [WebhookController] Falha na triagem por DM:', error));
+        }
+        res.status(200).json({ status: 'triagem' });
+        return;
+      }
+
       // 3. Whitelist de Grupos (Barreira Arquitetural contra custos indesejados no Vertex AI)
       const remoteJid = payload.data?.key?.remoteJid || payload.data?.id || payload.data?.groupJid;
-      
+
       if (remoteJid && !(await groupConfigRepository.isGroupAllowed(remoteJid))) {
         // Grupo não autorizado: Early return silencioso O(1). Nem o webhook da Evolution vai reclamar.
         res.status(200).json({ status: 'ignored', reason: 'Group not in whitelist' });

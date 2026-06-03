@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import strikeRepository from '../repositories/StrikeRepository';
 import promptRepository from '../repositories/PromptRepository';
+import triagemConfigRepository from '../triagem/repositories/TriagemConfigRepository';
+import triagemCandidateRepository from '../triagem/repositories/TriagemCandidateRepository';
 import conversationSummaryService from '../services/ConversationSummaryService';
 
 /**
@@ -104,6 +106,55 @@ class AdminController {
     }
   };
 
+  // ─── Triagem de Entrada ──────────────────────────────────────────────────
+
+  /**
+   * GET /admin/triagem/config
+   * Retorna os requisitos/contexto/nome do grupo usados na triagem.
+   */
+  public getTriagemConfig = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      res.status(200).json(await triagemConfigRepository.get());
+    } catch (error) {
+      console.error('❌ [AdminController] Erro ao buscar config de triagem:', error);
+      res.status(500).json({ error: 'Erro interno ao buscar a config de triagem.' });
+    }
+  };
+
+  /**
+   * POST /admin/triagem/config
+   * Atualiza requisitos/contexto/nomeGrupo (qualquer subconjunto).
+   * Body: { "requisitos"?: string, "contexto"?: string, "nomeGrupo"?: string }
+   */
+  public updateTriagemConfig = async (req: Request, res: Response): Promise<void> => {
+    const { requisitos, contexto, nomeGrupo } = req.body as {
+      requisitos?: string;
+      contexto?: string;
+      nomeGrupo?: string;
+    };
+
+    if (!requisitos && !contexto && !nomeGrupo) {
+      res.status(400).json({ error: 'Informe ao menos um de: requisitos, contexto, nomeGrupo.' });
+      return;
+    }
+
+    try {
+      const atual = await triagemConfigRepository.update({ requisitos, contexto, nomeGrupo });
+      res.status(200).json({ message: 'Config de triagem atualizada.', config: atual });
+    } catch (error) {
+      console.error('❌ [AdminController] Erro ao atualizar config de triagem:', error);
+      res.status(500).json({ error: 'Erro interno ao atualizar a config de triagem.' });
+    }
+  };
+
+  /**
+   * GET /admin/triagem/candidato/:jid
+   * Consulta o estado e a transcrição de um candidato.
+   */
+  public getTriagemCandidate = async (req: Request, res: Response): Promise<void> => {
+    const { jid } = req.params;
+    if (!jid) {
+      res.status(400).json({ error: 'Parâmetro jid é obrigatório.' });
   // ─── Resumo Mensal de Conversas ──────────────────────────────────────────
 
   /**
@@ -142,6 +193,15 @@ class AdminController {
     }
 
     try {
+      const candidate = await triagemCandidateRepository.get(jid);
+      if (!candidate) {
+        res.status(404).json({ message: 'Nenhum candidato encontrado para este JID.' });
+        return;
+      }
+      res.status(200).json(candidate);
+    } catch (error) {
+      console.error('❌ [AdminController] Erro ao consultar candidato:', error);
+      res.status(500).json({ error: 'Erro interno ao consultar o candidato.' });
       if (enviar === false) {
         const relatorio = await conversationSummaryService.gerarRelatorioDoMes(groupJid, anoAlvo, mesAlvo);
         res.status(200).json({ ano: anoAlvo, mes: mesAlvo, enviado: false, relatorio });
