@@ -40,6 +40,17 @@ router.get('/prompt', AdminController.getPrompt);
 // POST /admin/prompt → atualiza o prompt comportamental no Firestore
 router.post('/prompt', AdminController.updatePrompt);
 
+// ─── Triagem de Entrada ──────────────────────────────────────────────────────
+
+// GET  /admin/triagem/config → requisitos/contexto atuais
+router.get('/triagem/config', AdminController.getTriagemConfig);
+
+// POST /admin/triagem/config → atualiza requisitos/contexto/nomeGrupo
+router.post('/triagem/config', AdminController.updateTriagemConfig);
+
+// GET  /admin/triagem/candidato/:jid → estado + transcrição de um candidato
+router.get('/triagem/candidato/:jid', AdminController.getTriagemCandidate);
+
 // ─── Módulo Bot Webinars ─────────────────────────────────────────────────────
 
 // POST /admin/webinars → cria/atualiza webinar

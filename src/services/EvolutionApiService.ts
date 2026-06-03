@@ -215,6 +215,23 @@ class EvolutionApiService {
   }
 
   /**
+   * Adiciona participantes a um grupo específico.
+   * Obs.: se o alvo tiver privacidade restrita, o WhatsApp pode não adicionar
+   * direto e enviar um convite — a Evolution retorna o status por participante.
+   */
+  public async addParticipant(instance: string, remoteJid: string, participantJids: string[]): Promise<any> {
+    const endpoint = `/group/updateParticipant/${instance}`;
+    const body = {
+      groupJid: remoteJid,
+      action: 'add',
+      participants: participantJids,
+    };
+
+    console.log(`➕ Adicionando ${participantJids.length} participante(s) ao grupo ${remoteJid}`);
+    return this.request(endpoint, 'POST', body);
+  }
+
+  /**
    * Remove participantes (kick) de um grupo específico.
    */
   public async removeParticipant(instance: string, remoteJid: string, participantJids: string[]): Promise<void> {
