@@ -155,6 +155,22 @@ class AdminController {
     const { jid } = req.params;
     if (!jid) {
       res.status(400).json({ error: 'Parâmetro jid é obrigatório.' });
+      return;
+    }
+
+    try {
+      const candidate = await triagemCandidateRepository.get(jid);
+      if (!candidate) {
+        res.status(404).json({ message: 'Nenhum candidato encontrado para este JID.' });
+        return;
+      }
+      res.status(200).json(candidate);
+    } catch (error) {
+      console.error('❌ [AdminController] Erro ao consultar candidato:', error);
+      res.status(500).json({ error: 'Erro interno ao consultar o candidato.' });
+    }
+  };
+
   // ─── Resumo Mensal de Conversas ──────────────────────────────────────────
 
   /**
@@ -193,15 +209,6 @@ class AdminController {
     }
 
     try {
-      const candidate = await triagemCandidateRepository.get(jid);
-      if (!candidate) {
-        res.status(404).json({ message: 'Nenhum candidato encontrado para este JID.' });
-        return;
-      }
-      res.status(200).json(candidate);
-    } catch (error) {
-      console.error('❌ [AdminController] Erro ao consultar candidato:', error);
-      res.status(500).json({ error: 'Erro interno ao consultar o candidato.' });
       if (enviar === false) {
         const relatorio = await conversationSummaryService.gerarRelatorioDoMes(groupJid, anoAlvo, mesAlvo);
         res.status(200).json({ ano: anoAlvo, mes: mesAlvo, enviado: false, relatorio });
