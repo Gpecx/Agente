@@ -1,0 +1,25 @@
+PASSO A PASSO PARA GERAR O TOKEN DO GITHUB:
+
+1. Acesse o GitHub (https://github.com/) e faça login na conta Gpecx.
+2. No canto superior direito, clique na sua foto de perfil e vá em "Settings" (Configurações).
+3. Na barra lateral esquerda, role a página até o final e clique em "Developer settings" (Configurações de desenvolvedor).
+4. No menu esquerdo que abrir, clique em "Personal access tokens" e depois escolha a opção "Tokens (classic)".
+5. Clique no botão "Generate new token" (botão cinza/branco) e escolha "Generate new token (classic)".
+6. Na tela de criação:
+   - Em "Note" (Nome), digite algo como: Deploy Bot
+   - Em "Expiration", você pode deixar em "30 days" ou colocar "No expiration" (sem validade).
+   - MUITO IMPORTANTE: Na lista de caixinhas (Scopes), marque a caixinha principal chamada "repo" (isso dá acesso total a código).
+7. Role até o final e clique no botão verde "Generate token".
+
+O GitHub vai mostrar um código enorme começando com "ghp_" (ex: ghp_Kx1y2aBc3...).
+COPIE ESSE CÓDIGO AGORA! Ele não será mostrado novamente.
+
+-------------------------------------------------------------------
+COMO USAR NO TERMINAL:
+
+Volte para o seu terminal e rode novamente:
+git push -u origin main
+
+Quando o terminal pedir o "Password", COLE o token "ghp_..." que você acabou de copiar e aperte Enter. 
+
+(Atenção: Ao colar o token no terminal do Linux, os caracteres ficam invisíveis. Apenas cole e dê Enter).

@@ -23,13 +23,28 @@ class TriagemConfigRepository {
     return {
       requisitos:
         process.env.TRIAGEM_REQUISITOS ||
-        'Placeholder — edite via POST /api/admin/triagem/config. Exemplo: o candidato ' +
-          'deve atuar na área de tecnologia, ter interesse genuíno na comunidade e não ser ' +
-          'concorrente direto. Recuse perfis de spam/divulgação.',
+        [
+          'Aprove quem tem o perfil do público dos webinars de SPCS:',
+          '- atua ou estuda na área elétrica/energia, em especial proteção, controle e supervisão ' +
+            '(relés, subestações, automação, IEC 61850/GOOSE, testes de proteção, teleproteção, ' +
+            'concessionárias/integradoras); ou',
+          '- é estudante de engenharia elétrica / técnico em eletrotécnica com interesse genuíno; ou',
+          '- é gestor do setor elétrico interessado no conteúdo.',
+          'Sinais positivos: cita relés (SEL, Siemens, ABB, Pextron, Woodward), funções de proteção ' +
+            '(67, 79, diferencial), GOOSE, TC, teleproteção, ou descreve trabalho em subestação/proteção.',
+          'Reprove: spam/divulgação, vendedores buscando clientes, ou pessoas sem relação com o setor ' +
+            'elétrico e sem interesse real.',
+          'Use "duvida" quando a pessoa for educada e possivelmente do setor, mas a área/intenção ' +
+            'ficar ambígua mesmo após perguntar.',
+        ].join('\n'),
       contexto:
         process.env.TRIAGEM_CONTEXTO ||
-        'Grupo profissional de networking e troca de conhecimento.',
-      nomeGrupo: process.env.TRIAGEM_NOME_GRUPO || 'nosso grupo',
+        'Série "GPECx 12 Anos" — 12 webinars técnicos gratuitos sobre SPCS (Sistemas de Proteção, ' +
+          'Controle e Supervisão) do setor elétrico. Temas: lógicas em relés (SEL/Siemens/ABB), proteção ' +
+          'direcional 67, GOOSE/IEC 61850, testes de TC, teleproteção, religamento 79, simuladores e IA ' +
+          'aplicada a SPCS. Público: técnicos, engenheiros e gestores de proteção/controle/supervisão e ' +
+          'estudantes de engenharia elétrica.',
+      nomeGrupo: process.env.TRIAGEM_NOME_GRUPO || 'Webinars GPECx (SPCS)',
     };
   }
 
