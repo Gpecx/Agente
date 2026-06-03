@@ -40,6 +40,9 @@ router.get('/prompt', AdminController.getPrompt);
 // POST /admin/prompt → atualiza o prompt comportamental no Firestore
 router.post('/prompt', AdminController.updatePrompt);
 
+// POST /admin/summary → gera (e por padrão envia) o resumo mensal de um grupo
+router.post('/summary', AdminController.generateSummary);
+
 // ─── Módulo Bot Webinars ─────────────────────────────────────────────────────
 
 // POST /admin/webinars → cria/atualiza webinar

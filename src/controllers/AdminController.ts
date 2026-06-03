@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import strikeRepository from '../repositories/StrikeRepository';
 import promptRepository from '../repositories/PromptRepository';
+import conversationSummaryService from '../services/ConversationSummaryService';
 
 /**
  * Controller para operações administrativas do sistema de moderação.
@@ -100,6 +101,70 @@ class AdminController {
     } catch (error) {
       console.error('❌ [AdminController] Erro ao atualizar prompt:', error);
       res.status(500).json({ error: 'Erro interno ao atualizar o prompt.' });
+    }
+  };
+
+  // ─── Resumo Mensal de Conversas ──────────────────────────────────────────
+
+  /**
+   * POST /admin/summary
+   * Gera o resumo mensal das conversas de um grupo, sob demanda.
+   *
+   * Body: {
+   *   groupJid: string;            // obrigatório
+   *   ano?: number; mes?: number;  // default: mês anterior
+   *   enviar?: boolean;            // default true (posta no grupo admin)
+   *   destinoJid?: string;         // default ADMIN_GROUP_JID
+   * }
+   */
+  public generateSummary = async (req: Request, res: Response): Promise<void> => {
+    const { groupJid, ano, mes, enviar, destinoJid } = req.body as {
+      groupJid?: string;
+      ano?: number;
+      mes?: number;
+      enviar?: boolean;
+      destinoJid?: string;
+    };
+
+    if (!groupJid || typeof groupJid !== 'string') {
+      res.status(400).json({ error: 'O campo "groupJid" é obrigatório.' });
+      return;
+    }
+
+    // Default: mês anterior ao atual.
+    const agora = new Date();
+    const anoAlvo = ano ?? (agora.getMonth() === 0 ? agora.getFullYear() - 1 : agora.getFullYear());
+    const mesAlvo = mes ?? (agora.getMonth() === 0 ? 12 : agora.getMonth());
+
+    if (mesAlvo < 1 || mesAlvo > 12) {
+      res.status(400).json({ error: 'O campo "mes" deve estar entre 1 e 12.' });
+      return;
+    }
+
+    try {
+      if (enviar === false) {
+        const relatorio = await conversationSummaryService.gerarRelatorioDoMes(groupJid, anoAlvo, mesAlvo);
+        res.status(200).json({ ano: anoAlvo, mes: mesAlvo, enviado: false, relatorio });
+        return;
+      }
+
+      const instance = process.env.EVOLUTION_INSTANCE;
+      if (!instance) {
+        res.status(500).json({ error: 'EVOLUTION_INSTANCE não configurado — não é possível enviar.' });
+        return;
+      }
+
+      const relatorio = await conversationSummaryService.gerarEEnviar(
+        instance,
+        groupJid,
+        anoAlvo,
+        mesAlvo,
+        destinoJid
+      );
+      res.status(200).json({ ano: anoAlvo, mes: mesAlvo, enviado: true, relatorio });
+    } catch (error) {
+      console.error('❌ [AdminController] Erro ao gerar resumo mensal:', error);
+      res.status(500).json({ error: 'Erro interno ao gerar o resumo mensal.' });
     }
   };
 }
