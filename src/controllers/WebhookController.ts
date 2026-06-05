@@ -65,13 +65,11 @@ class WebhookController {
         !payload.data?.key?.fromMe &&
         dmJid?.endsWith('@s.whatsapp.net')
       ) {
-        const textoDm = moderationService.extractText(payload);
-        if (textoDm) {
-          // Fire-and-forget: libera o Express para responder 200 imediatamente.
-          triagemService
-            .handleDM(payload.instance, dmJid, textoDm, payload.data?.pushName || '')
-            .catch((error) => console.error('❌ [WebhookController] Falha na triagem por DM:', error));
-        }
+        // Fire-and-forget: libera o Express para responder 200 imediatamente.
+        // A triagem resolve texto ou transcreve áudio internamente.
+        triagemService
+          .handleIncomingDM(payload)
+          .catch((error) => console.error('❌ [WebhookController] Falha na triagem por DM:', error));
         res.status(200).json({ status: 'triagem' });
         return;
       }
