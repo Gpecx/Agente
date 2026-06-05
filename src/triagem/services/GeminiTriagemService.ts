@@ -69,6 +69,45 @@ Regras do formato:
     });
   }
 
+  /** Modelo texto-puro (sem JSON forçado) para transcrição de áudio. */
+  private get transcriptionModel() {
+    return this.vertexAi.preview.getGenerativeModel({
+      model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+      generationConfig: { temperature: 0 },
+    });
+  }
+
+  /**
+   * Transcreve um áudio de voz (PTT) do candidato para texto, alimentando o
+   * funil de triagem como se fosse uma mensagem escrita.
+   * @param base64 conteúdo do áudio (sem prefixo data:)
+   * @param mimeType ex.: "audio/ogg" (codecs são removidos pelo chamador)
+   * @returns a transcrição, ou null se falhar/vier vazia.
+   */
+  public async transcrever(base64: string, mimeType: string): Promise<string | null> {
+    try {
+      const result = await this.transcriptionModel.generateContent({
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { inlineData: { mimeType, data: base64 } },
+              {
+                text: 'Transcreva o áudio em português. Devolva apenas o texto falado, sem comentários nem aspas.',
+              },
+            ],
+          },
+        ],
+      } as any);
+
+      const raw = result.response?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      return raw || null;
+    } catch (error) {
+      console.error('❌ [GeminiTriagem] Falha ao transcrever áudio:', error);
+      return null;
+    }
+  }
+
   /**
    * Processa um turno: recebe o histórico completo (terminando na fala do
    * candidato) e devolve a resposta estruturada do agente.

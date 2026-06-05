@@ -232,6 +232,35 @@ class EvolutionApiService {
   }
 
   /**
+   * Baixa o conteúdo de uma mensagem de mídia (áudio/imagem/etc) em base64.
+   * Usado na triagem para transcrever áudios de voz (PTT) dos candidatos.
+   *
+   * Recebe o objeto `data` do webhook (que contém `key` + `message`), pois a
+   * Evolution precisa da mensagem completa para reidratar a mídia no Baileys.
+   * Retorna a resposta crua (`{ base64, mimetype, ... }`) ou undefined em falha.
+   */
+  public async getBase64FromMediaMessage(instance: string, messageData: Record<string, any>): Promise<any> {
+    const endpoint = `/chat/getBase64FromMediaMessage/${instance}`;
+    const body = { message: messageData, convertToMp4: false };
+    return this.request(endpoint, 'POST', body);
+  }
+
+  /**
+   * Obtém o link de convite de um grupo (a instância precisa ser admin).
+   * Usado como plano B da triagem: quando a adição automática não confirma
+   * (privacidade do candidato), mandamos o link para ele entrar sozinho.
+   * Retorna a URL de convite (`https://chat.whatsapp.com/...`) ou undefined.
+   */
+  public async fetchInviteCode(instance: string, groupJid: string): Promise<string | undefined> {
+    const endpoint = `/group/inviteCode/${instance}?groupJid=${encodeURIComponent(groupJid)}`;
+    const resp: any = await this.request(endpoint, 'GET');
+    if (!resp) return undefined;
+    if (typeof resp.inviteUrl === 'string') return resp.inviteUrl;
+    if (typeof resp.inviteCode === 'string') return `https://chat.whatsapp.com/${resp.inviteCode}`;
+    return undefined;
+  }
+
+  /**
    * Remove participantes (kick) de um grupo específico.
    */
   public async removeParticipant(instance: string, remoteJid: string, participantJids: string[]): Promise<void> {
