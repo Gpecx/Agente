@@ -8,6 +8,7 @@ import messageArchiveRepository from '../repositories/MessageArchiveRepository';
 import summaryNoticeService from '../services/SummaryNoticeService';
 import webinarOrchestrator from '../webinars/services/WebinarOrchestrator';
 import triagemService from '../triagem/services/TriagemService';
+import sparkCommunityOrchestrator from '../spark/services/SparkCommunityOrchestrator';
 
 class WebhookController {
   /**
@@ -65,6 +66,13 @@ class WebhookController {
         !payload.data?.key?.fromMe &&
         dmJid?.endsWith('@s.whatsapp.net')
       ) {
+        if (await sparkCommunityOrchestrator.shouldHandleDirectMessage(dmJid)) {
+          const texto = moderationService.extractText(payload);
+          await sparkCommunityOrchestrator.onMessage(payload, texto);
+          res.status(200).json({ status: 'spark' });
+          return;
+        }
+
         // Fire-and-forget: libera o Express para responder 200 imediatamente.
         // A triagem resolve texto ou transcreve áudio internamente.
         triagemService
@@ -135,6 +143,7 @@ class WebhookController {
     //    Reusa o texto já extraído pela moderação-base.
     const texto = moderationService.extractText(payload);
     await webinarOrchestrator.onMessage(payload, texto, baseHandled);
+    await sparkCommunityOrchestrator.onMessage(payload, texto);
 
     // 3) Arquiva a mensagem de texto para o resumo mensal (fire-and-forget).
     //    Só grupos (g.us); fromMe/flood/whitelist já foram filtrados acima.
@@ -170,6 +179,10 @@ class WebhookController {
     // Módulo de Webinars: boas-vindas + CTA de inscrição (respeitando anti-ban).
     webinarOrchestrator.onParticipantUpdate(payload).catch(error => {
       console.error('❌ [WebhookController] Falha silenciosa no WebinarOrchestrator:', error);
+    });
+
+    sparkCommunityOrchestrator.onParticipantUpdate(payload).catch(error => {
+      console.error('❌ [WebhookController] Falha silenciosa no SparkCommunityOrchestrator:', error);
     });
   }
 }

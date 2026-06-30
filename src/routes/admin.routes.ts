@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import AdminController from '../controllers/AdminController';
 import WebinarAdminController from '../webinars/controllers/WebinarAdminController';
+import SparkAdminController from '../spark/controllers/SparkAdminController';
 
 const router = Router();
 
@@ -75,5 +76,25 @@ router.get('/groups', WebinarAdminController.listGroups);
 
 // DELETE /admin/groups/:groupJid → remove grupo da whitelist
 router.delete('/groups/:groupJid', WebinarAdminController.removeGroup);
+
+// ─── Comunidade Spark ────────────────────────────────────────────────────────
+
+// GET  /admin/spark/members?limit=100 → lista membros Spark
+router.get('/spark/members', SparkAdminController.listMembers);
+
+// GET  /admin/spark/members/:jid → consulta um membro Spark
+router.get('/spark/members/:jid', SparkAdminController.getMember);
+
+// POST /admin/spark/members/:jid → ajusta estado operacional do membro
+router.post('/spark/members/:jid', SparkAdminController.updateMember);
+
+// POST /admin/spark/run/challenge → dispara o desafio semanal agora
+router.post('/spark/run/challenge', SparkAdminController.runChallengeNow);
+
+// POST /admin/spark/run/challenge-answer → dispara resposta + bonus agora
+router.post('/spark/run/challenge-answer', SparkAdminController.runChallengeAnswerNow);
+
+// POST /admin/spark/run/lifecycle → executa D+3 / D+10 agora
+router.post('/spark/run/lifecycle', SparkAdminController.runLifecycleNow);
 
 export default router;
