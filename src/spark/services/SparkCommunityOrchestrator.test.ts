@@ -76,6 +76,22 @@ const payload = (jid: string, text = 'oi', pushName = 'Teste') =>
     },
   }) as any;
 
+const groupPayload = (
+  groupJid: string,
+  participant = '137018214461678@lid',
+  text = 'oi',
+  pushName = 'Teste'
+) =>
+  ({
+    event: 'messages.upsert',
+    instance: 'instancia-teste',
+    data: {
+      key: { remoteJid: groupJid, participant, fromMe: false, id: 'msg-1' },
+      pushName,
+      message: { conversation: text },
+    },
+  }) as any;
+
 describe('SparkCommunityOrchestrator', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -155,5 +171,54 @@ describe('SparkCommunityOrchestrator', () => {
       '5511999999999@s.whatsapp.net',
       expect.stringContaining('Comandos Spark admin:')
     );
+  });
+
+  it('responde spark no grupo Spark dentro do proprio grupo', async () => {
+    await sparkCommunityOrchestrator.onMessage(
+      groupPayload('120363427851443399@g.us', '137018214461678@lid', 'spark'),
+      'spark'
+    );
+
+    expect(repo.ensure).toHaveBeenCalledWith(
+      '137018214461678@lid',
+      'Teste',
+      expect.any(String),
+      expect.any(Date)
+    );
+    expect(messaging.enviarGrupo).toHaveBeenCalledWith(
+      'instancia-teste',
+      '120363427851443399@g.us',
+      'Menu Spark'
+    );
+    expect(messaging.enviarDM).not.toHaveBeenCalled();
+  });
+
+  it('responde planos no grupo Spark dentro do proprio grupo', async () => {
+    await sparkCommunityOrchestrator.onMessage(
+      groupPayload('120363427851443399@g.us', '137018214461678@lid', 'quais os planos?'),
+      'quais os planos?'
+    );
+
+    expect(messaging.enviarGrupo).toHaveBeenCalledWith(
+      'instancia-teste',
+      '120363427851443399@g.us',
+      'Planos Spark\nhttps://example.com/planos'
+    );
+    expect(messaging.enviarDM).not.toHaveBeenCalled();
+  });
+
+  it('entrega chave no grupo Spark sem tentar DM para participante @lid', async () => {
+    await sparkCommunityOrchestrator.onMessage(
+      groupPayload('120363427851443399@g.us', '137018214461678@lid', 'preciso da chave'),
+      'preciso da chave'
+    );
+
+    expect(messaging.enviarGrupo).toHaveBeenCalledWith(
+      'instancia-teste',
+      '120363427851443399@g.us',
+      expect.stringContaining('Chave: *SPARK-TRIAL*')
+    );
+    expect(repo.markKeyDelivered).toHaveBeenCalledWith('137018214461678@lid');
+    expect(messaging.enviarDM).not.toHaveBeenCalled();
   });
 });
