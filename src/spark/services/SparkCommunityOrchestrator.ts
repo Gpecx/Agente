@@ -1,5 +1,6 @@
 import { EvolutionWebhookPayload } from '../../interfaces/evolution.interface';
 import { sparkConfig } from '../config/sparkConfig';
+import sparkAdminRepository from '../repositories/SparkAdminRepository';
 import sparkMemberRepository from '../repositories/SparkMemberRepository';
 import messaging from './SparkMessagingService';
 import { SparkUsageLevel } from '../interfaces/spark.interface';
@@ -130,8 +131,8 @@ class SparkCommunityOrchestrator {
     await messaging.enviarDM(instance, autorJid, texto);
   }
 
-  private isAdmin(autorJid: string): boolean {
-    return sparkConfig.adminJids.includes(autorJid);
+  private async isAdmin(autorJid: string): Promise<boolean> {
+    return sparkAdminRepository.isAdmin(autorJid);
   }
 
   private formatMemberSummary(member: any): string {
@@ -164,7 +165,7 @@ class SparkCommunityOrchestrator {
       return false;
     }
 
-    if (!this.isAdmin(autorJid)) {
+    if (!(await this.isAdmin(autorJid))) {
       await this.responderNoCanal(
         payload.instance,
         remoteJid,
@@ -425,6 +426,7 @@ class SparkCommunityOrchestrator {
     texto: string | null
   ): Promise<boolean> {
     if (!sparkConfig.enabled) return false;
+    if (!sparkConfig.dmEnabled) return false;
     const remoteJid = payload.data?.key?.remoteJid;
     if (!remoteJid || this.isGroup(remoteJid)) return false;
     if (this.isSparkIntentText(texto)) return true;
@@ -437,6 +439,7 @@ class SparkCommunityOrchestrator {
     const remoteJid = payload.data?.key?.remoteJid;
     const autorJid = payload.data?.key?.participant || remoteJid;
     if (!remoteJid || !autorJid) return;
+    if (!this.isGroup(remoteJid) && !sparkConfig.dmEnabled) return;
 
     if (await this.handleAdminCommand(payload, remoteJid, autorJid, texto)) return;
 

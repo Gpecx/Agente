@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../config/sparkConfig', () => ({
   sparkConfig: {
     enabled: true,
+    dmEnabled: false,
     evolutionInstance: 'instancia-teste',
     groupJid: '120363427851443399@g.us',
     adminJids: ['5511999999999@s.whatsapp.net'],
@@ -32,7 +33,10 @@ vi.mock('../config/sparkConfig', () => ({
   },
 }));
 
-const { repo, messaging } = vi.hoisted(() => ({
+const { adminRepo, repo, messaging } = vi.hoisted(() => ({
+  adminRepo: {
+    isAdmin: vi.fn(),
+  },
   repo: {
     get: vi.fn(),
     ensure: vi.fn(),
@@ -57,6 +61,10 @@ const { repo, messaging } = vi.hoisted(() => ({
 
 vi.mock('../repositories/SparkMemberRepository', () => ({
   default: repo,
+}));
+
+vi.mock('../repositories/SparkAdminRepository', () => ({
+  default: adminRepo,
 }));
 
 vi.mock('./SparkMessagingService', () => ({
@@ -104,71 +112,38 @@ describe('SparkCommunityOrchestrator', () => {
       usageLevel: 'unknown',
       pendingFlow: null,
     }));
+    adminRepo.isAdmin.mockResolvedValue(false);
   });
 
-  it('reconhece DM comercial de usuario novo como Spark', async () => {
+  it('mantem Spark desligado para mensagens privadas', async () => {
     await expect(
       sparkCommunityOrchestrator.shouldHandleDirectMessage(
         payload('5511888888888@s.whatsapp.net', 'quanto custa o plano?'),
         'quanto custa o plano?'
       )
-    ).resolves.toBe(true);
+    ).resolves.toBe(false);
   });
 
-  it('na primeira DM com planos cria membro e responde comercial', async () => {
+  it('ignora mensagens privadas quando DM do Spark esta desabilitada', async () => {
     await sparkCommunityOrchestrator.onMessage(
       payload('5511888888888@s.whatsapp.net', 'quais os valores?'),
       'quais os valores?'
     );
 
-    expect(repo.ensure).toHaveBeenCalledOnce();
-    expect(messaging.enviarDM).toHaveBeenCalledWith(
-      'instancia-teste',
-      '5511888888888@s.whatsapp.net',
-      'Planos Spark\nhttps://example.com/planos'
-    );
-    expect(repo.touchInteraction).toHaveBeenCalled();
-  });
-
-  it('na primeira DM com spark cria membro e responde menu principal', async () => {
-    await sparkCommunityOrchestrator.onMessage(
-      payload('5511777777777@s.whatsapp.net', 'spark'),
-      'spark'
-    );
-
-    expect(repo.ensure).toHaveBeenCalledOnce();
-    expect(messaging.enviarDM).toHaveBeenCalledWith(
-      'instancia-teste',
-      '5511777777777@s.whatsapp.net',
-      'Menu Spark'
-    );
-    expect(repo.markKeyDelivered).not.toHaveBeenCalled();
-  });
-
-  it('na primeira DM com chave cria membro e entrega a chave', async () => {
-    await sparkCommunityOrchestrator.onMessage(
-      payload('5511666666666@s.whatsapp.net', 'preciso da chave'),
-      'preciso da chave'
-    );
-
-    expect(repo.ensure).toHaveBeenCalledOnce();
-    expect(repo.markKeyDelivered).toHaveBeenCalledWith('5511666666666@s.whatsapp.net');
-    expect(messaging.enviarDM).toHaveBeenCalledWith(
-      'instancia-teste',
-      '5511666666666@s.whatsapp.net',
-      expect.stringContaining('Chave: *SPARK-TRIAL*')
-    );
+    expect(repo.ensure).not.toHaveBeenCalled();
+    expect(messaging.enviarDM).not.toHaveBeenCalled();
   });
 
   it('responde comando admin /spark help para JID autorizado', async () => {
+    adminRepo.isAdmin.mockResolvedValue(true);
     await sparkCommunityOrchestrator.onMessage(
-      payload('5511999999999@s.whatsapp.net', '/spark help'),
+      groupPayload('120363427851443399@g.us', '5511999999999@s.whatsapp.net', '/spark help'),
       '/spark help'
     );
 
-    expect(messaging.enviarDM).toHaveBeenCalledWith(
+    expect(messaging.enviarGrupo).toHaveBeenCalledWith(
       'instancia-teste',
-      '5511999999999@s.whatsapp.net',
+      '120363427851443399@g.us',
       expect.stringContaining('Comandos Spark admin:')
     );
   });

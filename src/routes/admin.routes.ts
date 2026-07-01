@@ -79,6 +79,18 @@ router.delete('/groups/:groupJid', WebinarAdminController.removeGroup);
 
 // ─── Comunidade Spark ────────────────────────────────────────────────────────
 
+// GET  /admin/spark/config → config operacional do Spark
+router.get('/spark/config', SparkAdminController.getConfig);
+
+// GET  /admin/spark/admins → lista JIDs autorizados a comandos Spark
+router.get('/spark/admins', SparkAdminController.listAdmins);
+
+// POST /admin/spark/admins → autoriza JID a comandos Spark
+router.post('/spark/admins', SparkAdminController.addAdmin);
+
+// DELETE /admin/spark/admins/:jid → remove autorização Spark
+router.delete('/spark/admins/:jid', SparkAdminController.removeAdmin);
+
 // GET  /admin/spark/members?limit=100 → lista membros Spark
 router.get('/spark/members', SparkAdminController.listMembers);
 
