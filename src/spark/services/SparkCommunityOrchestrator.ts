@@ -58,21 +58,31 @@ class SparkCommunityOrchestrator {
   }
 
   private async sendKeyFlow(instance: string, jid: string, segmento: 'A' | 'B' | 'C'): Promise<void> {
-    const ativacao = sparkConfig.activationUrl ? `\nAtive aqui: ${sparkConfig.activationUrl}` : '';
-    await messaging.enviarDM(
-      instance,
-      jid,
-      [
-        `Seu acesso Spark foi preparado no segmento *${segmento}*.`,
-        `Chave: *${sparkConfig.defaultKey}*`,
-        ativacao.trim(),
-        '',
-        sparkConfig.mainMenuText,
-      ]
-        .filter(Boolean)
-        .join('\n')
-    );
+    await messaging.enviarDM(instance, jid, this.buildKeyText(segmento));
     await sparkMemberRepository.markKeyDelivered(jid);
+  }
+
+  private async sendKeyFlowNoCanal(
+    instance: string,
+    remoteJid: string,
+    autorJid: string,
+    segmento: 'A' | 'B' | 'C'
+  ): Promise<void> {
+    await messaging.enviarGrupo(instance, remoteJid, this.buildKeyText(segmento));
+    await sparkMemberRepository.markKeyDelivered(autorJid);
+  }
+
+  private buildKeyText(segmento: 'A' | 'B' | 'C'): string {
+    const ativacao = sparkConfig.activationUrl ? `\nAtive aqui: ${sparkConfig.activationUrl}` : '';
+    return [
+      `Seu acesso Spark foi preparado no segmento *${segmento}*.`,
+      `Chave: *${sparkConfig.defaultKey}*`,
+      ativacao.trim(),
+      '',
+      sparkConfig.mainMenuText,
+    ]
+      .filter(Boolean)
+      .join('\n');
   }
 
   private async sendMainMenu(instance: string, jid: string): Promise<void> {
@@ -341,24 +351,33 @@ class SparkCommunityOrchestrator {
     return true;
   }
 
-  private async handleKeyword(instance: string, autorJid: string, text: string): Promise<boolean> {
+  private async handleKeyword(
+    instance: string,
+    remoteJid: string,
+    autorJid: string,
+    text: string
+  ): Promise<boolean> {
     const normalized = this.normalize(text);
 
     if (this.PLAN_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
       const suffix = sparkConfig.plansUrl ? `\n${sparkConfig.plansUrl}` : '';
-      await messaging.enviarDM(instance, autorJid, `${sparkConfig.plansText}${suffix}`);
+      await this.responderNoCanal(instance, remoteJid, autorJid, `${sparkConfig.plansText}${suffix}`);
       return true;
     }
 
     if (this.KEY_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
       const member = await sparkMemberRepository.get(autorJid);
       if (!member) return false;
-      await this.sendKeyFlow(instance, autorJid, member.segmento);
+      if (this.isGroup(remoteJid)) {
+        await this.sendKeyFlowNoCanal(instance, remoteJid, autorJid, member.segmento);
+      } else {
+        await this.sendKeyFlow(instance, autorJid, member.segmento);
+      }
       return true;
     }
 
     if (this.SUPPORT_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
-      await messaging.enviarDM(instance, autorJid, sparkConfig.helpText);
+      await this.responderNoCanal(instance, remoteJid, autorJid, sparkConfig.helpText);
       return true;
     }
 
@@ -435,7 +454,12 @@ class SparkCommunityOrchestrator {
       );
       await sparkMemberRepository.touchInteraction(autorJid, pushName);
 
-      const handled = await this.handleKeyword(payload.instance, autorJid, texto);
+      if (this.isMenuShortcut(this.normalize(texto))) {
+        await messaging.enviarGrupo(payload.instance, remoteJid, sparkConfig.mainMenuText);
+        return;
+      }
+
+      const handled = await this.handleKeyword(payload.instance, remoteJid, autorJid, texto);
       if (!handled) {
         const today = new Date().getDay();
         if (today === 2 || today === 3 || today === 4) {
@@ -444,7 +468,7 @@ class SparkCommunityOrchestrator {
       }
 
       if (!member.temChave) {
-        await this.sendKeyFlow(payload.instance, autorJid, member.segmento);
+        await this.sendKeyFlowNoCanal(payload.instance, remoteJid, autorJid, member.segmento);
       }
       return;
     }
@@ -453,7 +477,7 @@ class SparkCommunityOrchestrator {
     const member = await this.ensureMember(autorJid, pushName);
 
     if (await this.handlePendingFlow(payload.instance, autorJid, texto)) return;
-    if (await this.handleKeyword(payload.instance, autorJid, texto)) {
+    if (await this.handleKeyword(payload.instance, remoteJid, autorJid, texto)) {
       await sparkMemberRepository.touchInteraction(autorJid, pushName);
       return;
     }
