@@ -20,9 +20,15 @@ class SparkCommunityOrchestrator {
     'mensal',
     'mensais',
   ];
+  private readonly SUPPORT_KEYWORDS = ['ajuda', 'suporte', 'especialista', 'humano'];
+  private readonly KEY_KEYWORDS = ['chave', 'ativacao', 'ativar', 'acesso'];
 
   private isGroup(jid: string): boolean {
     return jid.endsWith('@g.us');
+  }
+
+  private isAdminCommand(text: string): boolean {
+    return text.startsWith('spark ') || text.startsWith('/spark ');
   }
 
   private normalize(text: string): string {
@@ -73,6 +79,34 @@ class SparkCommunityOrchestrator {
     await messaging.enviarDM(instance, jid, sparkConfig.mainMenuText);
   }
 
+  private isMenuShortcut(text: string): boolean {
+    return text === 'spark' || text === '/spark';
+  }
+
+  private isSparkIntentText(text: string | null): boolean {
+    if (!text) return false;
+    const normalized = this.normalize(text);
+
+    return (
+      this.isMenuShortcut(normalized) ||
+      this.isAdminCommand(normalized) ||
+      this.PLAN_KEYWORDS.some((keyword) => normalized.includes(keyword)) ||
+      this.SUPPORT_KEYWORDS.some((keyword) => normalized.includes(keyword)) ||
+      this.KEY_KEYWORDS.some((keyword) => normalized.includes(keyword))
+    );
+  }
+
+  private async ensureMember(jid: string, pushName: string) {
+    const existente = await sparkMemberRepository.get(jid);
+    if (existente) return existente;
+    return sparkMemberRepository.ensure(
+      jid,
+      pushName,
+      this.computeSegment(jid),
+      this.trialEndsAt(new Date())
+    );
+  }
+
   private async responderNoCanal(
     instance: string,
     remoteJid: string,
@@ -116,7 +150,7 @@ class SparkCommunityOrchestrator {
     texto: string
   ): Promise<boolean> {
     const normalized = this.normalize(texto);
-    if (!(normalized.startsWith('spark ') || normalized.startsWith('/spark ') || normalized === 'spark' || normalized === '/spark')) {
+    if (!this.isAdminCommand(normalized)) {
       return false;
     }
 
@@ -316,14 +350,14 @@ class SparkCommunityOrchestrator {
       return true;
     }
 
-    if (normalized.includes('chave')) {
+    if (this.KEY_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
       const member = await sparkMemberRepository.get(autorJid);
       if (!member) return false;
       await this.sendKeyFlow(instance, autorJid, member.segmento);
       return true;
     }
 
-    if (normalized.includes('ajuda')) {
+    if (this.SUPPORT_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
       await messaging.enviarDM(instance, autorJid, sparkConfig.helpText);
       return true;
     }
@@ -367,9 +401,15 @@ class SparkCommunityOrchestrator {
     return false;
   }
 
-  public async shouldHandleDirectMessage(jid: string): Promise<boolean> {
+  public async shouldHandleDirectMessage(
+    payload: EvolutionWebhookPayload,
+    texto: string | null
+  ): Promise<boolean> {
     if (!sparkConfig.enabled) return false;
-    return !!(await sparkMemberRepository.get(jid));
+    const remoteJid = payload.data?.key?.remoteJid;
+    if (!remoteJid || this.isGroup(remoteJid)) return false;
+    if (this.isSparkIntentText(texto)) return true;
+    return !!(texto && (await sparkMemberRepository.get(remoteJid)));
   }
 
   async onMessage(payload: EvolutionWebhookPayload, texto: string | null): Promise<void> {
@@ -409,12 +449,18 @@ class SparkCommunityOrchestrator {
       return;
     }
 
-    const member = await sparkMemberRepository.get(autorJid);
-    if (!member) return;
+    const normalized = this.normalize(texto);
+    const member = await this.ensureMember(autorJid, pushName);
 
     if (await this.handlePendingFlow(payload.instance, autorJid, texto)) return;
     if (await this.handleKeyword(payload.instance, autorJid, texto)) {
       await sparkMemberRepository.touchInteraction(autorJid, pushName);
+      return;
+    }
+
+    if (this.isMenuShortcut(normalized)) {
+      await sparkMemberRepository.touchInteraction(autorJid, pushName);
+      await this.sendMainMenu(payload.instance, autorJid);
       return;
     }
 

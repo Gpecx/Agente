@@ -55,32 +55,7 @@ class WebhookController {
         return;
       }
 
-      // 2.5 Triagem de entrada por DM (intake de novos membros).
-      //     Roda ANTES da whitelist de grupos: mensagens individuais (não-grupo)
-      //     nunca estão na whitelist e seriam descartadas. Gated por TRIAGEM_ENABLED.
-      //     O rate-limiter (passo 2) já protege contra flood/custo.
-      const dmJid = payload.data?.key?.remoteJid;
-      if (
-        process.env.TRIAGEM_ENABLED === 'true' &&
-        payload.event === 'messages.upsert' &&
-        !payload.data?.key?.fromMe &&
-        dmJid?.endsWith('@s.whatsapp.net')
-      ) {
-        if (await sparkCommunityOrchestrator.shouldHandleDirectMessage(dmJid)) {
-          const texto = moderationService.extractText(payload);
-          await sparkCommunityOrchestrator.onMessage(payload, texto);
-          res.status(200).json({ status: 'spark' });
-          return;
-        }
-
-        // Fire-and-forget: libera o Express para responder 200 imediatamente.
-        // A triagem resolve texto ou transcreve áudio internamente.
-        triagemService
-          .handleIncomingDM(payload)
-          .catch((error) => console.error('❌ [WebhookController] Falha na triagem por DM:', error));
-        res.status(200).json({ status: 'triagem' });
-        return;
-      }
+      if (await this.handleDirectMessage(payload, res)) return;
 
       // 3. Whitelist de Grupos (Barreira Arquitetural contra custos indesejados no Vertex AI)
       const remoteJid = payload.data?.key?.remoteJid || payload.data?.id || payload.data?.groupJid;
@@ -125,6 +100,49 @@ class WebhookController {
   private getHeaderValue(req: Request, name: string): string | undefined {
     const value = req.headers[name];
     return Array.isArray(value) ? value[0] : value;
+  }
+
+  /**
+   * Trata mensagens privadas antes da whitelist de grupos.
+   * Ordem:
+   *   1. Spark (por intenção ou membro já conhecido)
+   *   2. Triagem (se habilitada)
+   *   3. Ignora de forma explícita quando nenhum fluxo se aplica
+   */
+  private async handleDirectMessage(
+    payload: EvolutionWebhookPayload,
+    res: Response
+  ): Promise<boolean> {
+    const dmJid = payload.data?.key?.remoteJid;
+
+    if (
+      payload.event !== 'messages.upsert' ||
+      payload.data?.key?.fromMe ||
+      !dmJid?.endsWith('@s.whatsapp.net')
+    ) {
+      return false;
+    }
+
+    const texto = moderationService.extractText(payload);
+
+    if (await sparkCommunityOrchestrator.shouldHandleDirectMessage(payload, texto)) {
+      await sparkCommunityOrchestrator.onMessage(payload, texto);
+      res.status(200).json({ status: 'spark' });
+      return true;
+    }
+
+    if (process.env.TRIAGEM_ENABLED === 'true') {
+      // Fire-and-forget: libera o Express para responder 200 imediatamente.
+      // A triagem resolve texto ou transcreve áudio internamente.
+      triagemService
+        .handleIncomingDM(payload)
+        .catch((error) => console.error('❌ [WebhookController] Falha na triagem por DM:', error));
+      res.status(200).json({ status: 'triagem' });
+      return true;
+    }
+
+    res.status(200).json({ status: 'ignored', reason: 'Direct message not handled' });
+    return true;
   }
 
   /**
