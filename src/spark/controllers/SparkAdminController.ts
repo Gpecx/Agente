@@ -1,4 +1,6 @@
 import { Request, Response } from 'express';
+import { sparkConfig } from '../config/sparkConfig';
+import sparkAdminRepository from '../repositories/SparkAdminRepository';
 import sparkMemberRepository from '../repositories/SparkMemberRepository';
 import sparkCommunityOrchestrator from '../services/SparkCommunityOrchestrator';
 import { SparkSegmento, SparkUsageLevel } from '../interfaces/spark.interface';
@@ -7,6 +9,65 @@ const SEGMENTOS_VALIDOS: SparkSegmento[] = ['A', 'B', 'C'];
 const USAGE_VALIDOS: SparkUsageLevel[] = ['unknown', 'high', 'low'];
 
 class SparkAdminController {
+  public getConfig = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      res.status(200).json({
+        enabled: sparkConfig.enabled,
+        dmEnabled: sparkConfig.dmEnabled,
+        groupJid: sparkConfig.groupJid,
+        evolutionInstance: sparkConfig.evolutionInstance,
+        admins: await sparkAdminRepository.list(),
+      });
+    } catch (error) {
+      console.error('❌ [SparkAdminController] Erro ao buscar config Spark:', error);
+      res.status(500).json({ error: 'Erro interno ao buscar config Spark.' });
+    }
+  };
+
+  public listAdmins = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const admins = await sparkAdminRepository.list();
+      res.status(200).json({ count: admins.length, admins });
+    } catch (error) {
+      console.error('❌ [SparkAdminController] Erro ao listar admins Spark:', error);
+      res.status(500).json({ error: 'Erro interno ao listar admins Spark.' });
+    }
+  };
+
+  public addAdmin = async (req: Request, res: Response): Promise<void> => {
+    const { jid } = req.body as { jid?: string };
+    const cleanJid = jid?.trim();
+
+    if (!cleanJid || !cleanJid.includes('@')) {
+      res.status(400).json({ error: 'jid obrigatório. Ex.: 5511999999999@s.whatsapp.net ou ...@lid.' });
+      return;
+    }
+
+    try {
+      await sparkAdminRepository.add(cleanJid);
+      res.status(200).json({ message: `Admin Spark ${cleanJid} autorizado.`, jid: cleanJid });
+    } catch (error) {
+      console.error('❌ [SparkAdminController] Erro ao adicionar admin Spark:', error);
+      res.status(500).json({ error: 'Erro interno ao adicionar admin Spark.' });
+    }
+  };
+
+  public removeAdmin = async (req: Request, res: Response): Promise<void> => {
+    const { jid } = req.params;
+    if (!jid) {
+      res.status(400).json({ error: 'Parâmetro jid é obrigatório.' });
+      return;
+    }
+
+    try {
+      await sparkAdminRepository.remove(jid);
+      res.status(200).json({ message: `Admin Spark ${jid} removido.` });
+    } catch (error) {
+      console.error('❌ [SparkAdminController] Erro ao remover admin Spark:', error);
+      res.status(500).json({ error: 'Erro interno ao remover admin Spark.' });
+    }
+  };
+
   public listMembers = async (req: Request, res: Response): Promise<void> => {
     const limitRaw = Number(req.query.limit || 100);
     const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(limitRaw, 500)) : 100;

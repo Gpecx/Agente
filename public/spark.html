@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spark Controle</title>
+  <style>
+    :root {
+      --bg: #f4f0e8;
+      --ink: #1f2926;
+      --muted: #66726d;
+      --panel: #fffaf0;
+      --line: #d8cdbd;
+      --green: #0f6b4f;
+      --green-dark: #094633;
+      --amber: #c77b12;
+      --red: #b13b2e;
+      --white: #ffffff;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        linear-gradient(135deg, rgba(15, 107, 79, 0.08), rgba(199, 123, 18, 0.08)),
+        var(--bg);
+    }
+
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 48px;
+    }
+
+    header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 22px;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: clamp(28px, 4vw, 44px);
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 16px;
+    }
+
+    .panel {
+      grid-column: span 6;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      box-shadow: 0 10px 30px rgba(47, 39, 25, 0.08);
+    }
+
+    .panel.wide { grid-column: span 12; }
+    .panel.small { grid-column: span 4; }
+
+    .bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 12px;
+    }
+
+    input, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: var(--white);
+      color: var(--ink);
+      border-radius: 6px;
+      padding: 11px 12px;
+      font-size: 14px;
+      outline: none;
+    }
+
+    input:focus, select:focus {
+      border-color: var(--green);
+      box-shadow: 0 0 0 3px rgba(15, 107, 79, 0.12);
+    }
+
+    button {
+      border: 0;
+      border-radius: 6px;
+      padding: 11px 14px;
+      color: var(--white);
+      background: var(--green);
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    button:hover { background: var(--green-dark); }
+    button.secondary { background: #3f514b; }
+    button.warn { background: var(--amber); }
+    button.danger { background: var(--red); }
+
+    .stack {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .item {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.55);
+      min-width: 0;
+    }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      word-break: break-all;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      padding: 5px 9px;
+      font-size: 12px;
+      color: var(--muted);
+      background: rgba(255, 255, 255, 0.6);
+    }
+
+    .status {
+      min-height: 22px;
+      margin-top: 12px;
+      font-weight: 700;
+      color: var(--green);
+    }
+
+    .status.error { color: var(--red); }
+
+    .members {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .member {
+      display: grid;
+      grid-template-columns: minmax(160px, 1fr) 120px 120px 110px auto;
+      gap: 8px;
+      align-items: center;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.55);
+    }
+
+    @media (max-width: 860px) {
+      header { align-items: flex-start; flex-direction: column; }
+      .panel, .panel.small { grid-column: span 12; }
+      .row { flex-direction: column; align-items: stretch; }
+      .member { grid-template-columns: 1fr; }
+      button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Spark Controle</h1>
+        <p>Painel operacional do agente para grupos, admins, membros e disparos manuais.</p>
+      </div>
+      <span class="pill" id="configPill">carregando config</span>
+    </header>
+
+    <section class="panel wide">
+      <div class="bar">
+        <div>
+          <h2>Acesso</h2>
+          <p>Use a mesma ADMIN_API_KEY do backend.</p>
+        </div>
+        <button class="secondary" onclick="carregarTudo()">Atualizar</button>
+      </div>
+      <div class="row">
+        <input id="adminKey" type="password" placeholder="ADMIN_API_KEY">
+        <button onclick="salvarChave()">Salvar chave</button>
+      </div>
+      <div class="status" id="statusGlobal"></div>
+    </section>
+
+    <section class="grid">
+      <article class="panel">
+        <div class="bar">
+          <div>
+            <h2>Grupos liberados</h2>
+            <p>Controla quais grupos passam pela whitelist do webhook.</p>
+          </div>
+          <span class="pill" id="groupsCount">0</span>
+        </div>
+        <div class="row">
+          <input id="groupJid" placeholder="120363...@g.us">
+          <button onclick="adicionarGrupo()">Adicionar</button>
+        </div>
+        <div class="stack" id="groupsList"></div>
+      </article>
+
+      <article class="panel">
+        <div class="bar">
+          <div>
+            <h2>Permissoes Spark</h2>
+            <p>JIDs autorizados a usar comandos /spark.</p>
+          </div>
+          <span class="pill" id="adminsCount">0</span>
+        </div>
+        <div class="row">
+          <input id="adminJid" placeholder="5511999999999@s.whatsapp.net ou ...@lid">
+          <button onclick="adicionarAdminSpark()">Autorizar</button>
+        </div>
+        <div class="stack" id="adminsList"></div>
+      </article>
+
+      <article class="panel small">
+        <div class="bar">
+          <div>
+            <h2>Disparos</h2>
+            <p>Acoes manuais do Spark.</p>
+          </div>
+        </div>
+        <div class="stack">
+          <button onclick="rodar('/api/admin/spark/run/challenge')">Desafio semanal</button>
+          <button class="warn" onclick="rodar('/api/admin/spark/run/challenge-answer')">Resposta + bonus</button>
+          <button class="secondary" onclick="rodar('/api/admin/spark/run/lifecycle')">Ciclo D+3/D+10</button>
+        </div>
+      </article>
+
+      <article class="panel wide">
+        <div class="bar">
+          <div>
+            <h2>Membros Spark</h2>
+            <p>Ajuste uso, chave, segmento e fluxo pendente.</p>
+          </div>
+          <span class="pill" id="membersCount">0</span>
+        </div>
+        <div class="row">
+          <input id="memberFilter" placeholder="Filtrar por JID ou nome" oninput="renderMembers()">
+          <button class="secondary" onclick="carregarMembros()">Recarregar membros</button>
+        </div>
+        <div class="members" id="membersList"></div>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let members = [];
+
+    function key() {
+      return $('adminKey').value.trim();
+    }
+
+    function headers() {
+      return {
+        Authorization: `Bearer ${key()}`,
+        'Content-Type': 'application/json',
+      };
+    }
+
+    function flash(message, error = false) {
+      const el = $('statusGlobal');
+      el.textContent = message;
+      el.className = `status${error ? ' error' : ''}`;
+      setTimeout(() => {
+        el.textContent = '';
+        el.className = 'status';
+      }, 4500);
+    }
+
+    async function api(path, options = {}) {
+      if (!key()) throw new Error('Informe a ADMIN_API_KEY.');
+      const res = await fetch(path, {
+        ...options,
+        headers: { ...headers(), ...(options.headers || {}) },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || data.message || 'Falha na requisicao.');
+      return data;
+    }
+
+    function salvarChave() {
+      localStorage.setItem('sparkAdminKey', key());
+      flash('Chave salva neste navegador.');
+      carregarTudo();
+    }
+
+    async function carregarConfig() {
+      const cfg = await api('/api/admin/spark/config');
+      $('configPill').textContent = `Spark ${cfg.enabled ? 'ativo' : 'off'} · DM ${cfg.dmEnabled ? 'ativa' : 'off'} · ${cfg.groupJid || 'sem grupo'}`;
+    }
+
+    async function carregarGrupos() {
+      const data = await api('/api/admin/groups');
+      $('groupsCount').textContent = String(data.count || 0);
+      $('groupsList').innerHTML = (data.groups || []).map((jid) => `
+        <div class="item">
+          <span class="mono">${jid}</span>
+          <button class="danger" onclick="removerGrupo('${encodeURIComponent(jid)}')">Remover</button>
+        </div>
+      `).join('') || '<p>Nenhum grupo liberado.</p>';
+    }
+
+    async function adicionarGrupo() {
+      const groupJid = $('groupJid').value.trim();
+      if (!groupJid.endsWith('@g.us')) return flash('O grupo deve terminar com @g.us.', true);
+      await api('/api/admin/groups', {
+        method: 'POST',
+        body: JSON.stringify({ groupJid }),
+      });
+      $('groupJid').value = '';
+      flash('Grupo liberado.');
+      carregarGrupos();
+    }
+
+    async function removerGrupo(encodedJid) {
+      await api(`/api/admin/groups/${encodedJid}`, { method: 'DELETE' });
+      flash('Grupo removido.');
+      carregarGrupos();
+    }
+
+    async function carregarAdminsSpark() {
+      const data = await api('/api/admin/spark/admins');
+      $('adminsCount').textContent = String(data.count || 0);
+      $('adminsList').innerHTML = (data.admins || []).map((jid) => `
+        <div class="item">
+          <span class="mono">${jid}</span>
+          <button class="danger" onclick="removerAdminSpark('${encodeURIComponent(jid)}')">Remover</button>
+        </div>
+      `).join('') || '<p>Nenhum admin Spark cadastrado.</p>';
+    }
+
+    async function adicionarAdminSpark() {
+      const jid = $('adminJid').value.trim();
+      if (!jid.includes('@')) return flash('Informe um JID valido.', true);
+      await api('/api/admin/spark/admins', {
+        method: 'POST',
+        body: JSON.stringify({ jid }),
+      });
+      $('adminJid').value = '';
+      flash('Permissao Spark adicionada.');
+      carregarAdminsSpark();
+      carregarConfig();
+    }
+
+    async function removerAdminSpark(encodedJid) {
+      await api(`/api/admin/spark/admins/${encodedJid}`, { method: 'DELETE' });
+      flash('Permissao Spark removida.');
+      carregarAdminsSpark();
+      carregarConfig();
+    }
+
+    async function carregarMembros() {
+      const data = await api('/api/admin/spark/members?limit=200');
+      members = data.members || [];
+      $('membersCount').textContent = String(data.count || 0);
+      renderMembers();
+    }
+
+    function renderMembers() {
+      const filter = $('memberFilter').value.trim().toLowerCase();
+      const filtered = members.filter((m) => {
+        const text = `${m.jid || ''} ${m.pushName || ''}`.toLowerCase();
+        return !filter || text.includes(filter);
+      });
+
+      $('membersList').innerHTML = filtered.map((m) => `
+        <div class="member">
+          <div>
+            <strong>${m.pushName || 'Sem nome'}</strong>
+            <div class="mono">${m.jid}</div>
+          </div>
+          <select id="usage-${cssId(m.jid)}">
+            ${option('unknown', m.usageLevel)}
+            ${option('high', m.usageLevel)}
+            ${option('low', m.usageLevel)}
+          </select>
+          <select id="segmento-${cssId(m.jid)}">
+            ${option('A', m.segmento)}
+            ${option('B', m.segmento)}
+            ${option('C', m.segmento)}
+          </select>
+          <select id="chave-${cssId(m.jid)}">
+            <option value="true" ${m.temChave ? 'selected' : ''}>com chave</option>
+            <option value="false" ${!m.temChave ? 'selected' : ''}>sem chave</option>
+          </select>
+          <button onclick="salvarMembro('${encodeURIComponent(m.jid)}')">Salvar</button>
+        </div>
+      `).join('') || '<p>Nenhum membro encontrado.</p>';
+    }
+
+    function cssId(value) {
+      return btoa(unescape(encodeURIComponent(value))).replace(/[^a-zA-Z0-9]/g, '');
+    }
+
+    function option(value, selected) {
+      return `<option value="${value}" ${value === selected ? 'selected' : ''}>${value}</option>`;
+    }
+
+    async function salvarMembro(encodedJid) {
+      const jid = decodeURIComponent(encodedJid);
+      const id = cssId(jid);
+      await api(`/api/admin/spark/members/${encodedJid}`, {
+        method: 'POST',
+        body: JSON.stringify({
+          usageLevel: $(`usage-${id}`).value,
+          segmento: $(`segmento-${id}`).value,
+          temChave: $(`chave-${id}`).value === 'true',
+        }),
+      });
+      flash('Membro atualizado.');
+      carregarMembros();
+    }
+
+    async function rodar(path) {
+      await api(path, { method: 'POST', body: JSON.stringify({}) });
+      flash('Acao disparada.');
+    }
+
+    async function carregarTudo() {
+      try {
+        await Promise.all([
+          carregarConfig(),
+          carregarGrupos(),
+          carregarAdminsSpark(),
+          carregarMembros(),
+        ]);
+      } catch (error) {
+        flash(error.message, true);
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      $('adminKey').value = localStorage.getItem('sparkAdminKey') || '';
+      if (key()) carregarTudo();
+    });
+  </script>
+</body>
+</html>

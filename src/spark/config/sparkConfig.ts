@@ -16,6 +16,7 @@ function parseList(value: string | undefined): string[] {
 
 export const sparkConfig = {
   enabled: process.env.SPARK_ENABLED === 'true',
+  dmEnabled: process.env.SPARK_DM_ENABLED === 'true',
   evolutionInstance: process.env.EVOLUTION_INSTANCE || '',
   groupJid: process.env.SPARK_GROUP_JID || '',
   adminJids: parseList(process.env.SPARK_ADMIN_JIDS),
