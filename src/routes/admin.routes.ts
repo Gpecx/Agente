@@ -82,6 +82,9 @@ router.delete('/groups/:groupJid', WebinarAdminController.removeGroup);
 // GET  /admin/spark/config → config operacional do Spark
 router.get('/spark/config', SparkAdminController.getConfig);
 
+// POST /admin/spark/config → atualiza config operacional runtime do Spark
+router.post('/spark/config', SparkAdminController.updateConfig);
+
 // GET  /admin/spark/admins → lista JIDs autorizados a comandos Spark
 router.get('/spark/admins', SparkAdminController.listAdmins);
 

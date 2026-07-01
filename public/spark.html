@@ -123,6 +123,7 @@
     }
 
     button:hover { background: var(--green-dark); }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
     button.secondary { background: #3f514b; }
     button.warn { background: var(--amber); }
     button.danger { background: var(--red); }
@@ -170,6 +171,12 @@
     }
 
     .status.error { color: var(--red); }
+
+    .hint {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
 
     .members {
       display: grid;
@@ -256,14 +263,34 @@
       <article class="panel small">
         <div class="bar">
           <div>
+            <h2>Config Spark</h2>
+            <p>Controla DM e grupo ativo sem redeploy.</p>
+          </div>
+        </div>
+        <div class="stack">
+          <label class="mono">
+            <input id="dmEnabled" type="checkbox" style="width:auto; margin-right:8px;">
+            Permitir respostas na DM
+          </label>
+          <input id="sparkGroupJid" placeholder="Grupo Spark ativo: 120363...@g.us">
+          <button onclick="salvarConfigSpark()">Salvar config</button>
+          <button class="secondary" onclick="desativarDm()">Desativar DM agora</button>
+          <p class="hint" id="configHint">Carregando...</p>
+        </div>
+      </article>
+
+      <article class="panel small">
+        <div class="bar">
+          <div>
             <h2>Disparos</h2>
             <p>Acoes manuais do Spark.</p>
           </div>
         </div>
         <div class="stack">
-          <button onclick="rodar('/api/admin/spark/run/challenge')">Desafio semanal</button>
-          <button class="warn" onclick="rodar('/api/admin/spark/run/challenge-answer')">Resposta + bonus</button>
-          <button class="secondary" onclick="rodar('/api/admin/spark/run/lifecycle')">Ciclo D+3/D+10</button>
+          <button onclick="rodar('/api/admin/spark/run/challenge', this)">Desafio semanal</button>
+          <button class="warn" onclick="rodar('/api/admin/spark/run/challenge-answer', this)">Resposta + bonus</button>
+          <button class="secondary" onclick="rodar('/api/admin/spark/run/lifecycle', this)">Ciclo D+3/D+10</button>
+          <p class="hint" id="actionLog">Os resultados aparecem aqui.</p>
         </div>
       </article>
 
@@ -329,6 +356,9 @@
     async function carregarConfig() {
       const cfg = await api('/api/admin/spark/config');
       $('configPill').textContent = `Spark ${cfg.enabled ? 'ativo' : 'off'} · DM ${cfg.dmEnabled ? 'ativa' : 'off'} · ${cfg.groupJid || 'sem grupo'}`;
+      $('dmEnabled').checked = !!cfg.dmEnabled;
+      $('sparkGroupJid').value = cfg.groupJid || '';
+      $('configHint').textContent = `Instancia: ${cfg.evolutionInstance || 'n/d'} · fallback env: ${cfg.envGroupJid || 'sem grupo'}`;
     }
 
     async function carregarGrupos() {
@@ -337,7 +367,10 @@
       $('groupsList').innerHTML = (data.groups || []).map((jid) => `
         <div class="item">
           <span class="mono">${jid}</span>
-          <button class="danger" onclick="removerGrupo('${encodeURIComponent(jid)}')">Remover</button>
+          <span>
+            <button class="secondary" onclick="usarGrupoSpark('${encodeURIComponent(jid)}')">Usar no Spark</button>
+            <button class="danger" onclick="removerGrupo('${encodeURIComponent(jid)}')">Remover</button>
+          </span>
         </div>
       `).join('') || '<p>Nenhum grupo liberado.</p>';
     }
@@ -352,6 +385,41 @@
       $('groupJid').value = '';
       flash('Grupo liberado.');
       carregarGrupos();
+    }
+
+    async function usarGrupoSpark(encodedJid) {
+      const groupJid = decodeURIComponent(encodedJid);
+      await api('/api/admin/spark/config', {
+        method: 'POST',
+        body: JSON.stringify({ groupJid }),
+      });
+      flash('Grupo Spark ativo atualizado.');
+      carregarConfig();
+    }
+
+    async function salvarConfigSpark() {
+      const groupJid = $('sparkGroupJid').value.trim();
+      if (groupJid && !groupJid.endsWith('@g.us')) return flash('O grupo Spark deve terminar com @g.us.', true);
+
+      const data = await api('/api/admin/spark/config', {
+        method: 'POST',
+        body: JSON.stringify({
+          dmEnabled: $('dmEnabled').checked,
+          groupJid,
+        }),
+      });
+      flash(data.message || 'Config Spark salva.');
+      carregarConfig();
+    }
+
+    async function desativarDm() {
+      $('dmEnabled').checked = false;
+      await api('/api/admin/spark/config', {
+        method: 'POST',
+        body: JSON.stringify({ dmEnabled: false }),
+      });
+      flash('DM do Spark desativada.');
+      carregarConfig();
     }
 
     async function removerGrupo(encodedJid) {
@@ -453,9 +521,38 @@
       carregarMembros();
     }
 
-    async function rodar(path) {
-      await api(path, { method: 'POST', body: JSON.stringify({}) });
-      flash('Acao disparada.');
+    function formatResult(data) {
+      const result = data.result || {};
+      const parts = [data.message || 'Acao executada.'];
+      if (result.reason) parts.push(`Motivo: ${result.reason}`);
+      if (result.target) parts.push(`Destino: ${result.target}`);
+      if (result.bonusSent !== undefined) parts.push(`Bonus enviados: ${result.bonusSent}`);
+      if (result.bonusSkipped !== undefined) parts.push(`Bonus pulados: ${result.bonusSkipped}`);
+      if (result.inactivitySent !== undefined) parts.push(`D+3 enviados: ${result.inactivitySent}`);
+      if (result.expirySent !== undefined) parts.push(`D+10 enviados: ${result.expirySent}`);
+      return parts.join(' · ');
+    }
+
+    async function rodar(path, button) {
+      const originalText = button?.textContent;
+      if (button) {
+        button.disabled = true;
+        button.textContent = 'Executando...';
+      }
+      try {
+        const data = await api(path, { method: 'POST', body: JSON.stringify({}) });
+        const msg = formatResult(data);
+        $('actionLog').textContent = msg;
+        flash(msg, data.result && data.result.sent === false);
+      } catch (error) {
+        $('actionLog').textContent = error.message;
+        flash(error.message, true);
+      } finally {
+        if (button) {
+          button.disabled = false;
+          button.textContent = originalText;
+        }
+      }
     }
 
     async function carregarTudo() {
