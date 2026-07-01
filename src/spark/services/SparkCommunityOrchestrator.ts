@@ -2,8 +2,19 @@ import { EvolutionWebhookPayload } from '../../interfaces/evolution.interface';
 import { sparkConfig } from '../config/sparkConfig';
 import sparkAdminRepository from '../repositories/SparkAdminRepository';
 import sparkMemberRepository from '../repositories/SparkMemberRepository';
+import sparkSettingsRepository from '../repositories/SparkSettingsRepository';
 import messaging from './SparkMessagingService';
 import { SparkUsageLevel } from '../interfaces/spark.interface';
+
+export interface SparkRunResult {
+  sent: boolean;
+  target?: string;
+  reason?: string;
+  bonusSent?: number;
+  bonusSkipped?: number;
+  inactivitySent?: number;
+  expirySent?: number;
+}
 
 class SparkCommunityOrchestrator {
   private readonly PLAN_KEYWORDS = [
@@ -133,6 +144,20 @@ class SparkCommunityOrchestrator {
 
   private async isAdmin(autorJid: string): Promise<boolean> {
     return sparkAdminRepository.isAdmin(autorJid);
+  }
+
+  private async getRuntimeSettings() {
+    return sparkSettingsRepository.get();
+  }
+
+  private async getSparkGroupJid(): Promise<string> {
+    const settings = await this.getRuntimeSettings();
+    return settings.groupJid;
+  }
+
+  private async isDmEnabled(): Promise<boolean> {
+    const settings = await this.getRuntimeSettings();
+    return settings.dmEnabled;
   }
 
   private formatMemberSummary(member: any): string {
@@ -300,18 +325,37 @@ class SparkCommunityOrchestrator {
     if (action === 'run') {
       const target = (parts[1] || '').toLowerCase();
       if (target === 'challenge') {
-        await this.sendWeeklyChallenge();
-        await this.responderNoCanal(payload.instance, remoteJid, autorJid, 'Desafio semanal disparado.');
+        const result = await this.sendWeeklyChallenge();
+        await this.responderNoCanal(
+          payload.instance,
+          remoteJid,
+          autorJid,
+          result.sent ? 'Desafio semanal disparado.' : `Desafio semanal nao disparado: ${result.reason || 'motivo desconhecido'}.`
+        );
         return true;
       }
       if (target === 'answer') {
-        await this.sendWeeklyAnswerAndBonus();
-        await this.responderNoCanal(payload.instance, remoteJid, autorJid, 'Resposta semanal + bonus disparados.');
+        const result = await this.sendWeeklyAnswerAndBonus();
+        await this.responderNoCanal(
+          payload.instance,
+          remoteJid,
+          autorJid,
+          result.sent
+            ? `Resposta semanal disparada. Bonus enviados: ${result.bonusSent || 0}.`
+            : `Resposta semanal nao disparada: ${result.reason || 'motivo desconhecido'}.`
+        );
         return true;
       }
       if (target === 'lifecycle') {
-        await this.runLifecycleChecks();
-        await this.responderNoCanal(payload.instance, remoteJid, autorJid, 'Ciclo de vida Spark executado.');
+        const result = await this.runLifecycleChecks();
+        await this.responderNoCanal(
+          payload.instance,
+          remoteJid,
+          autorJid,
+          result.sent
+            ? `Ciclo de vida Spark executado. D+3: ${result.inactivitySent || 0}; D+10: ${result.expirySent || 0}.`
+            : `Ciclo de vida nao executado: ${result.reason || 'motivo desconhecido'}.`
+        );
         return true;
       }
       await this.responderNoCanal(
@@ -426,7 +470,7 @@ class SparkCommunityOrchestrator {
     texto: string | null
   ): Promise<boolean> {
     if (!sparkConfig.enabled) return false;
-    if (!sparkConfig.dmEnabled) return false;
+    if (!(await this.isDmEnabled())) return false;
     const remoteJid = payload.data?.key?.remoteJid;
     if (!remoteJid || this.isGroup(remoteJid)) return false;
     if (this.isSparkIntentText(texto)) return true;
@@ -439,12 +483,13 @@ class SparkCommunityOrchestrator {
     const remoteJid = payload.data?.key?.remoteJid;
     const autorJid = payload.data?.key?.participant || remoteJid;
     if (!remoteJid || !autorJid) return;
-    if (!this.isGroup(remoteJid) && !sparkConfig.dmEnabled) return;
+    const settings = await this.getRuntimeSettings();
+    if (!this.isGroup(remoteJid) && !settings.dmEnabled) return;
 
     if (await this.handleAdminCommand(payload, remoteJid, autorJid, texto)) return;
 
     const pushName = payload.data?.pushName || '';
-    const isSparkGroup = sparkConfig.groupJid && remoteJid === sparkConfig.groupJid;
+    const isSparkGroup = settings.groupJid && remoteJid === settings.groupJid;
 
     if (this.isGroup(remoteJid)) {
       if (!isSparkGroup) return;
@@ -506,7 +551,8 @@ class SparkCommunityOrchestrator {
 
     const remoteJid = payload.data?.id || payload.data?.key?.remoteJid || payload.data?.groupJid;
     const participants = payload.data?.participants || [];
-    if (!remoteJid || remoteJid !== sparkConfig.groupJid || participants.length === 0) return;
+    const settings = await this.getRuntimeSettings();
+    if (!remoteJid || remoteJid !== settings.groupJid || participants.length === 0) return;
 
     for (const jid of participants) {
       const member = await sparkMemberRepository.ensure(
@@ -517,59 +563,104 @@ class SparkCommunityOrchestrator {
       );
 
       const numero = jid.split('@')[0];
+      if (settings.dmEnabled) {
+        await messaging.enviarGrupoComMencao(
+          payload.instance,
+          remoteJid,
+          `@${numero} bem-vindo(a) ao Spark. Vou te mandar sua chave e o menu principal no privado agora.`,
+          jid
+        );
+
+        if (member.temChave) {
+          await this.sendMainMenu(payload.instance, jid);
+        } else {
+          await this.sendKeyFlow(payload.instance, jid, member.segmento);
+        }
+        continue;
+      }
+
       await messaging.enviarGrupoComMencao(
         payload.instance,
         remoteJid,
-        `@${numero} bem-vindo(a) ao Spark. Vou te mandar sua chave e o menu principal no privado agora.`,
+        `@${numero} bem-vindo(a) ao Spark. O atendimento por DM esta desativado, entao vou manter tudo aqui no grupo.`,
         jid
       );
-
       if (member.temChave) {
-        await this.sendMainMenu(payload.instance, jid);
+        await messaging.enviarGrupo(payload.instance, remoteJid, sparkConfig.mainMenuText);
       } else {
-        await this.sendKeyFlow(payload.instance, jid, member.segmento);
+        await this.sendKeyFlowNoCanal(payload.instance, remoteJid, jid, member.segmento);
       }
     }
   }
 
-  async sendWeeklyChallenge(): Promise<void> {
-    if (!sparkConfig.enabled || !sparkConfig.evolutionInstance || !sparkConfig.groupJid) return;
+  async sendWeeklyChallenge(): Promise<SparkRunResult> {
+    const groupJid = await this.getSparkGroupJid();
+    if (!sparkConfig.enabled) return { sent: false, reason: 'Spark desativado' };
+    if (!sparkConfig.evolutionInstance) return { sent: false, reason: 'EVOLUTION_INSTANCE nao configurado' };
+    if (!groupJid) return { sent: false, reason: 'Grupo Spark nao configurado' };
+
     await messaging.enviarGrupo(
       sparkConfig.evolutionInstance,
-      sparkConfig.groupJid,
+      groupJid,
       sparkConfig.challengeText
     );
+    return { sent: true, target: groupJid };
   }
 
-  async sendWeeklyAnswerAndBonus(): Promise<void> {
-    if (!sparkConfig.enabled || !sparkConfig.evolutionInstance || !sparkConfig.groupJid) return;
+  async sendWeeklyAnswerAndBonus(): Promise<SparkRunResult> {
+    const settings = await this.getRuntimeSettings();
+    if (!sparkConfig.enabled) return { sent: false, reason: 'Spark desativado' };
+    if (!sparkConfig.evolutionInstance) return { sent: false, reason: 'EVOLUTION_INSTANCE nao configurado' };
+    if (!settings.groupJid) return { sent: false, reason: 'Grupo Spark nao configurado' };
 
     const weekKey = this.weekKey(new Date());
     await messaging.enviarGrupo(
       sparkConfig.evolutionInstance,
-      sparkConfig.groupJid,
+      settings.groupJid,
       sparkConfig.challengeAnswerText
     );
 
     const participants = await sparkMemberRepository.listChallengeParticipants(weekKey);
+    let bonusSent = 0;
+    let bonusSkipped = 0;
+
     for (const member of participants) {
-      if (member.lastBonusWeekSent === weekKey) continue;
+      if (member.lastBonusWeekSent === weekKey) {
+        bonusSkipped += 1;
+        continue;
+      }
+      if (!settings.dmEnabled) {
+        bonusSkipped += 1;
+        continue;
+      }
       await messaging.enviarDM(
         sparkConfig.evolutionInstance,
         member.jid,
         sparkConfig.challengeBonusText
       );
       await sparkMemberRepository.markBonusSent(member.jid, weekKey);
+      bonusSent += 1;
     }
+
+    return {
+      sent: true,
+      target: settings.groupJid,
+      bonusSent,
+      bonusSkipped,
+      reason: settings.dmEnabled ? undefined : 'DM desativada: bonus privados foram pulados',
+    };
   }
 
-  async runLifecycleChecks(agora: Date = new Date()): Promise<void> {
-    if (!sparkConfig.enabled || !sparkConfig.evolutionInstance) return;
+  async runLifecycleChecks(agora: Date = new Date()): Promise<SparkRunResult> {
+    if (!sparkConfig.enabled) return { sent: false, reason: 'Spark desativado' };
+    if (!sparkConfig.evolutionInstance) return { sent: false, reason: 'EVOLUTION_INSTANCE nao configurado' };
+    if (!(await this.isDmEnabled())) return { sent: false, reason: 'DM desativada no painel' };
 
     const inactivityCutoff = new Date(
       agora.getTime() - sparkConfig.inactivityDays * 24 * 60 * 60 * 1000
     );
     const inativos = await sparkMemberRepository.listDueInactivity(inactivityCutoff);
+    let inactivitySent = 0;
     for (const member of inativos) {
       await messaging.enviarDM(
         sparkConfig.evolutionInstance,
@@ -577,6 +668,7 @@ class SparkCommunityOrchestrator {
         sparkConfig.technicalQuestionText
       );
       await sparkMemberRepository.markInactivityPrompt(member.jid);
+      inactivitySent += 1;
     }
 
     const windowStart = new Date(
@@ -587,6 +679,7 @@ class SparkCommunityOrchestrator {
     );
     const expirando = await sparkMemberRepository.listDueExpiry(windowStart, windowEnd);
 
+    let expirySent = 0;
     for (const member of expirando) {
       if (member.usageLevel === 'high') {
         const suffix = sparkConfig.plansUrl ? `\n${sparkConfig.plansUrl}` : '';
@@ -596,6 +689,7 @@ class SparkCommunityOrchestrator {
           `${sparkConfig.upgradeText}${suffix}`
         );
         await sparkMemberRepository.markExpiryPrompt(member.jid, null);
+        expirySent += 1;
         continue;
       }
 
@@ -605,7 +699,10 @@ class SparkCommunityOrchestrator {
         sparkConfig.lowUsageDiagnosticText
       );
       await sparkMemberRepository.markExpiryPrompt(member.jid);
+      expirySent += 1;
     }
+
+    return { sent: true, inactivitySent, expirySent };
   }
 }
 

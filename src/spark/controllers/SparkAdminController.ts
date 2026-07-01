@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { sparkConfig } from '../config/sparkConfig';
 import sparkAdminRepository from '../repositories/SparkAdminRepository';
 import sparkMemberRepository from '../repositories/SparkMemberRepository';
+import sparkSettingsRepository from '../repositories/SparkSettingsRepository';
 import sparkCommunityOrchestrator from '../services/SparkCommunityOrchestrator';
 import { SparkSegmento, SparkUsageLevel } from '../interfaces/spark.interface';
 
@@ -11,16 +12,61 @@ const USAGE_VALIDOS: SparkUsageLevel[] = ['unknown', 'high', 'low'];
 class SparkAdminController {
   public getConfig = async (_req: Request, res: Response): Promise<void> => {
     try {
+      const settings = await sparkSettingsRepository.get();
       res.status(200).json({
         enabled: sparkConfig.enabled,
-        dmEnabled: sparkConfig.dmEnabled,
-        groupJid: sparkConfig.groupJid,
+        dmEnabled: settings.dmEnabled,
+        groupJid: settings.groupJid,
+        envDmEnabled: sparkConfig.dmEnabled,
+        envGroupJid: sparkConfig.groupJid,
         evolutionInstance: sparkConfig.evolutionInstance,
         admins: await sparkAdminRepository.list(),
       });
     } catch (error) {
       console.error('❌ [SparkAdminController] Erro ao buscar config Spark:', error);
       res.status(500).json({ error: 'Erro interno ao buscar config Spark.' });
+    }
+  };
+
+  public updateConfig = async (req: Request, res: Response): Promise<void> => {
+    const { dmEnabled, groupJid } = req.body as {
+      dmEnabled?: boolean;
+      groupJid?: string;
+    };
+
+    const patch: { dmEnabled?: boolean; groupJid?: string } = {};
+
+    if (dmEnabled !== undefined) {
+      if (typeof dmEnabled !== 'boolean') {
+        res.status(400).json({ error: 'dmEnabled deve ser boolean.' });
+        return;
+      }
+      patch.dmEnabled = dmEnabled;
+    }
+
+    if (groupJid !== undefined) {
+      const cleanGroupJid = groupJid.trim();
+      if (cleanGroupJid && !cleanGroupJid.endsWith('@g.us')) {
+        res.status(400).json({ error: 'groupJid deve terminar com @g.us ou ficar vazio.' });
+        return;
+      }
+      patch.groupJid = cleanGroupJid;
+    }
+
+    if (Object.keys(patch).length === 0) {
+      res.status(400).json({ error: 'Informe dmEnabled e/ou groupJid para atualizar.' });
+      return;
+    }
+
+    try {
+      const settings = await sparkSettingsRepository.update(patch);
+      res.status(200).json({
+        message: 'Config Spark atualizada.',
+        settings,
+      });
+    } catch (error) {
+      console.error('❌ [SparkAdminController] Erro ao atualizar config Spark:', error);
+      res.status(500).json({ error: 'Erro interno ao atualizar config Spark.' });
     }
   };
 
@@ -186,8 +232,11 @@ class SparkAdminController {
 
   public runChallengeNow = async (_req: Request, res: Response): Promise<void> => {
     try {
-      await sparkCommunityOrchestrator.sendWeeklyChallenge();
-      res.status(200).json({ message: 'Desafio semanal Spark disparado.' });
+      const result = await sparkCommunityOrchestrator.sendWeeklyChallenge();
+      res.status(200).json({
+        message: result.sent ? 'Desafio semanal Spark disparado.' : 'Desafio semanal Spark nao disparado.',
+        result,
+      });
     } catch (error) {
       console.error('❌ [SparkAdminController] Erro ao disparar desafio Spark:', error);
       res.status(500).json({ error: 'Erro interno ao disparar o desafio Spark.' });
@@ -196,8 +245,11 @@ class SparkAdminController {
 
   public runChallengeAnswerNow = async (_req: Request, res: Response): Promise<void> => {
     try {
-      await sparkCommunityOrchestrator.sendWeeklyAnswerAndBonus();
-      res.status(200).json({ message: 'Resposta semanal Spark + bonus disparados.' });
+      const result = await sparkCommunityOrchestrator.sendWeeklyAnswerAndBonus();
+      res.status(200).json({
+        message: result.sent ? 'Resposta semanal Spark disparada.' : 'Resposta semanal Spark nao disparada.',
+        result,
+      });
     } catch (error) {
       console.error('❌ [SparkAdminController] Erro ao disparar resposta do desafio Spark:', error);
       res.status(500).json({ error: 'Erro interno ao disparar a resposta do desafio Spark.' });
@@ -206,8 +258,11 @@ class SparkAdminController {
 
   public runLifecycleNow = async (_req: Request, res: Response): Promise<void> => {
     try {
-      await sparkCommunityOrchestrator.runLifecycleChecks();
-      res.status(200).json({ message: 'Ciclo de vida Spark executado manualmente.' });
+      const result = await sparkCommunityOrchestrator.runLifecycleChecks();
+      res.status(200).json({
+        message: result.sent ? 'Ciclo de vida Spark executado manualmente.' : 'Ciclo de vida Spark nao executado.',
+        result,
+      });
     } catch (error) {
       console.error('❌ [SparkAdminController] Erro ao executar ciclo de vida Spark:', error);
       res.status(500).json({ error: 'Erro interno ao executar o ciclo de vida Spark.' });

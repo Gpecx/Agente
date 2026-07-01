@@ -33,7 +33,7 @@ vi.mock('../config/sparkConfig', () => ({
   },
 }));
 
-const { adminRepo, repo, messaging } = vi.hoisted(() => ({
+const { adminRepo, repo, settingsRepo, messaging } = vi.hoisted(() => ({
   adminRepo: {
     isAdmin: vi.fn(),
   },
@@ -52,6 +52,9 @@ const { adminRepo, repo, messaging } = vi.hoisted(() => ({
     markExpiryPrompt: vi.fn(),
     markChallengeParticipation: vi.fn(),
   },
+  settingsRepo: {
+    get: vi.fn(),
+  },
   messaging: {
     enviarDM: vi.fn(),
     enviarGrupo: vi.fn(),
@@ -65,6 +68,10 @@ vi.mock('../repositories/SparkMemberRepository', () => ({
 
 vi.mock('../repositories/SparkAdminRepository', () => ({
   default: adminRepo,
+}));
+
+vi.mock('../repositories/SparkSettingsRepository', () => ({
+  default: settingsRepo,
 }));
 
 vi.mock('./SparkMessagingService', () => ({
@@ -112,6 +119,10 @@ describe('SparkCommunityOrchestrator', () => {
       usageLevel: 'unknown',
       pendingFlow: null,
     }));
+    settingsRepo.get.mockResolvedValue({
+      dmEnabled: false,
+      groupJid: '120363427851443399@g.us',
+    });
     adminRepo.isAdmin.mockResolvedValue(false);
   });
 
@@ -178,6 +189,40 @@ describe('SparkCommunityOrchestrator', () => {
       'instancia-teste',
       '120363427851443399@g.us',
       'Planos Spark\nhttps://example.com/planos'
+    );
+    expect(messaging.enviarDM).not.toHaveBeenCalled();
+  });
+
+  it('dispara desafio semanal no grupo Spark configurado pelo painel', async () => {
+    await expect(sparkCommunityOrchestrator.sendWeeklyChallenge()).resolves.toEqual({
+      sent: true,
+      target: '120363427851443399@g.us',
+    });
+
+    expect(messaging.enviarGrupo).toHaveBeenCalledWith(
+      'instancia-teste',
+      '120363427851443399@g.us',
+      'Desafio'
+    );
+  });
+
+  it('pula bonus privado quando DM esta desabilitada, mas envia resposta no grupo', async () => {
+    repo.listChallengeParticipants.mockResolvedValue([
+      { jid: '5511888888888@s.whatsapp.net', lastBonusWeekSent: undefined },
+    ]);
+
+    const result = await sparkCommunityOrchestrator.sendWeeklyAnswerAndBonus();
+
+    expect(result).toMatchObject({
+      sent: true,
+      target: '120363427851443399@g.us',
+      bonusSent: 0,
+      bonusSkipped: 1,
+    });
+    expect(messaging.enviarGrupo).toHaveBeenCalledWith(
+      'instancia-teste',
+      '120363427851443399@g.us',
+      'Resposta'
     );
     expect(messaging.enviarDM).not.toHaveBeenCalled();
   });
