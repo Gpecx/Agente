@@ -5,6 +5,19 @@ class SparkMessagingService {
     await evolutionApiService.sendText(instance, groupJid, texto);
   }
 
+  async enviarImagemGrupo(
+    instance: string,
+    groupJid: string,
+    imageUrl: string,
+    caption: string
+  ): Promise<void> {
+    await evolutionApiService.sendMedia(instance, groupJid, {
+      mediatype: 'image',
+      media: imageUrl,
+      caption,
+    });
+  }
+
   async enviarGrupoComMencao(
     instance: string,
     groupJid: string,

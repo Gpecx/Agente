@@ -2,6 +2,7 @@ import * as admin from 'firebase-admin';
 import { firebaseApp } from '../../config/firebase';
 import {
   SparkMember,
+  SparkGeneratedKey,
   SparkPendingFlow,
   SparkSegmento,
   SparkUsageLevel,
@@ -24,22 +25,40 @@ class SparkMemberRepository {
     return value instanceof Date ? value : undefined;
   }
 
+  private parseGeneratedKeys(value: any): SparkGeneratedKey[] {
+    if (!Array.isArray(value)) return [];
+    return value
+      .filter((item) => item && typeof item.code === 'string' && typeof item.type === 'string')
+      .map((item) => ({
+        type: item.type,
+        code: item.code,
+        createdAt: this.tsToDate(item.createdAt),
+        reason: typeof item.reason === 'string' ? item.reason : undefined,
+        challengeId: typeof item.challengeId === 'string' ? item.challengeId : undefined,
+      }));
+  }
+
   private fromDoc(jid: string, data: any): SparkMember {
     return {
       jid,
       pushName: data.pushName || '',
       segmento: (data.segmento as SparkSegmento) || 'A',
+      hasExistingKey: typeof data.hasExistingKey === 'boolean' ? data.hasExistingKey : undefined,
       temChave: !!data.temChave,
       chaveEntregueEm: this.tsToDate(data.chaveEntregueEm),
       usageLevel: (data.usageLevel as SparkUsageLevel) || 'unknown',
+      appUsageCount: Number.isFinite(Number(data.appUsageCount)) ? Number(data.appUsageCount) : 0,
       joinedAt: this.tsToDate(data.joinedAt),
       lastInteractionAt: this.tsToDate(data.lastInteractionAt),
+      lastMenuAt: this.tsToDate(data.lastMenuAt),
+      lastChallengeAnswerAt: this.tsToDate(data.lastChallengeAnswerAt),
       trialEndsAt: this.tsToDate(data.trialEndsAt),
       lastInactivityPromptAt: this.tsToDate(data.lastInactivityPromptAt),
       lastExpiryPromptAt: this.tsToDate(data.lastExpiryPromptAt),
       pendingFlow: (data.pendingFlow as SparkPendingFlow) || null,
       challengeWeeks: Array.isArray(data.challengeWeeks) ? data.challengeWeeks : [],
       lastBonusWeekSent: typeof data.lastBonusWeekSent === 'string' ? data.lastBonusWeekSent : undefined,
+      generatedKeys: this.parseGeneratedKeys(data.generatedKeys),
     };
   }
 
@@ -85,10 +104,13 @@ class SparkMemberRepository {
             jid,
             pushName,
             segmento,
+            hasExistingKey: null,
             temChave: false,
             usageLevel: 'unknown',
+            appUsageCount: 0,
             pendingFlow: null,
             challengeWeeks: [],
+            generatedKeys: [],
             joinedAt: admin.firestore.Timestamp.fromDate(now),
             lastInteractionAt: admin.firestore.Timestamp.fromDate(now),
             trialEndsAt: admin.firestore.Timestamp.fromDate(trialEndsAt),
@@ -116,9 +138,12 @@ class SparkMemberRepository {
         jid,
         pushName,
         segmento,
+        hasExistingKey: undefined,
         temChave: false,
         usageLevel: 'unknown',
+        appUsageCount: 0,
         pendingFlow: null,
+        generatedKeys: [],
         joinedAt: now,
         lastInteractionAt: now,
         trialEndsAt,
@@ -157,6 +182,27 @@ class SparkMemberRepository {
     });
   }
 
+  async markMenuSent(jid: string): Promise<void> {
+    await this.save(jid, {
+      lastMenuAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+
+  async setAppUsageCount(jid: string, appUsageCount: number): Promise<void> {
+    await this.save(jid, {
+      appUsageCount: Math.max(0, Math.floor(appUsageCount)),
+    });
+  }
+
+  async addGeneratedKey(jid: string, key: Omit<SparkGeneratedKey, 'createdAt'>): Promise<void> {
+    await this.save(jid, {
+      generatedKeys: admin.firestore.FieldValue.arrayUnion({
+        ...key,
+        createdAt: admin.firestore.Timestamp.fromDate(new Date()),
+      }),
+    });
+  }
+
   async setPendingFlow(jid: string, pendingFlow: SparkPendingFlow): Promise<void> {
     await this.save(jid, { pendingFlow });
   }
@@ -168,6 +214,7 @@ class SparkMemberRepository {
   async markChallengeParticipation(jid: string, weekKey: string): Promise<void> {
     await this.save(jid, {
       challengeWeeks: admin.firestore.FieldValue.arrayUnion(weekKey),
+      lastChallengeAnswerAt: admin.firestore.FieldValue.serverTimestamp(),
     });
   }
 

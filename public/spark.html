@@ -186,7 +186,7 @@
 
     .member {
       display: grid;
-      grid-template-columns: minmax(160px, 1fr) 120px 120px 110px auto;
+      grid-template-columns: minmax(160px, 1fr) 110px 90px 100px 90px 150px auto;
       gap: 8px;
       align-items: center;
       padding: 10px;
@@ -297,6 +297,50 @@
       <article class="panel wide">
         <div class="bar">
           <div>
+            <h2>Desafio semanal</h2>
+            <p>Cadastre o desafio, publique no grupo e acompanhe respostas.</p>
+          </div>
+          <span class="pill" id="challengesCount">0</span>
+        </div>
+        <input id="challengeId" type="hidden">
+        <div class="row">
+          <input id="challengeWeek" placeholder="weekKey ex: 2026-06-29">
+          <input id="challengeNumber" type="number" min="1" placeholder="#N">
+          <select id="challengeCorrect">
+            <option value="A">Correta A</option>
+            <option value="B">Correta B</option>
+            <option value="C">Correta C</option>
+            <option value="D">Correta D</option>
+          </select>
+        </div>
+        <div class="row">
+          <input id="challengeQuestion" placeholder="Pergunta do desafio">
+          <input id="challengeImageUrl" placeholder="Imagem opcional URL/base64">
+        </div>
+        <div class="row">
+          <input id="challengeA" placeholder="Alternativa A">
+          <input id="challengeB" placeholder="Alternativa B">
+        </div>
+        <div class="row">
+          <input id="challengeC" placeholder="Alternativa C">
+          <input id="challengeD" placeholder="Alternativa D">
+        </div>
+        <div class="row">
+          <input id="challengeCorrectLabel" placeholder="Rótulo da resposta correta">
+          <input id="challengeExplanation" placeholder="Explicação técnica curta">
+        </div>
+        <div class="row">
+          <button onclick="salvarDesafio()">Salvar desafio</button>
+          <button class="secondary" onclick="limparDesafio()">Novo</button>
+          <button class="warn" onclick="publicarDesafioSelecionado()">Publicar no grupo</button>
+        </div>
+        <div class="stack" id="challengesList"></div>
+        <div class="stack" id="answersList"></div>
+      </article>
+
+      <article class="panel wide">
+        <div class="bar">
+          <div>
             <h2>Membros Spark</h2>
             <p>Ajuste uso, chave, segmento e fluxo pendente.</p>
           </div>
@@ -314,6 +358,7 @@
   <script>
     const $ = (id) => document.getElementById(id);
     let members = [];
+    let challenges = [];
 
     function key() {
       return $('adminKey').value.trim();
@@ -493,6 +538,14 @@
             <option value="true" ${m.temChave ? 'selected' : ''}>com chave</option>
             <option value="false" ${!m.temChave ? 'selected' : ''}>sem chave</option>
           </select>
+          <input id="appUsage-${cssId(m.jid)}" type="number" min="0" value="${m.appUsageCount || 0}" title="Uso do app">
+          <select id="pending-${cssId(m.jid)}">
+            ${option('', m.pendingFlow || '')}
+            ${option('ask_existing_key', m.pendingFlow || '')}
+            ${option('ask_segment', m.pendingFlow || '')}
+            ${option('technical_question', m.pendingFlow || '')}
+            ${option('low_usage_diagnosis', m.pendingFlow || '')}
+          </select>
           <button onclick="salvarMembro('${encodeURIComponent(m.jid)}')">Salvar</button>
         </div>
       `).join('') || '<p>Nenhum membro encontrado.</p>';
@@ -515,10 +568,137 @@
           usageLevel: $(`usage-${id}`).value,
           segmento: $(`segmento-${id}`).value,
           temChave: $(`chave-${id}`).value === 'true',
+          appUsageCount: Number($(`appUsage-${id}`).value || 0),
+          pendingFlow: $(`pending-${id}`).value || null,
         }),
       });
       flash('Membro atualizado.');
       carregarMembros();
+    }
+
+    function defaultWeekKey(date = new Date()) {
+      const d = new Date(date);
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
+    function limparDesafio() {
+      $('challengeId').value = '';
+      $('challengeWeek').value = defaultWeekKey();
+      $('challengeNumber').value = '';
+      $('challengeCorrect').value = 'A';
+      $('challengeQuestion').value = 'Qual o tipo de falta nesta curva?';
+      $('challengeImageUrl').value = '';
+      $('challengeA').value = 'Monofásica-terra';
+      $('challengeB').value = 'Bifásica';
+      $('challengeC').value = 'Bifásica-terra';
+      $('challengeD').value = 'Trifásica';
+      $('challengeCorrectLabel').value = 'Monofásica-terra';
+      $('challengeExplanation').value = '';
+    }
+
+    async function carregarDesafios() {
+      const data = await api('/api/admin/spark/challenges');
+      challenges = data.challenges || [];
+      $('challengesCount').textContent = String(data.count || 0);
+      $('challengesList').innerHTML = challenges.map((challenge, index) => `
+        <div class="item">
+          <span>
+            <strong>#${challenge.number} · ${challenge.weekKey} · ${challenge.status}</strong>
+            <div class="mono">${challenge.id}</div>
+          </span>
+          <span>
+            <button class="secondary" onclick="carregarDesafioNoFormByIndex(${index})">Editar</button>
+            <button onclick="publicarDesafio('${challenge.id}')">Publicar</button>
+            <button class="warn" onclick="publicarResposta('${challenge.id}')">Resposta</button>
+            <button class="secondary" onclick="carregarRespostas('${challenge.id}')">Respostas</button>
+          </span>
+        </div>
+      `).join('') || '<p>Nenhum desafio cadastrado.</p>';
+      if (!$('challengeWeek').value) limparDesafio();
+    }
+
+    function carregarDesafioNoFormByIndex(index) {
+      const challenge = challenges[index];
+      if (challenge) carregarDesafioNoForm(challenge);
+    }
+
+    function carregarDesafioNoForm(challenge) {
+      $('challengeId').value = challenge.id || '';
+      $('challengeWeek').value = challenge.weekKey || defaultWeekKey();
+      $('challengeNumber').value = challenge.number || '';
+      $('challengeCorrect').value = challenge.correctOption || 'A';
+      $('challengeQuestion').value = challenge.question || '';
+      $('challengeImageUrl').value = challenge.imageUrl || '';
+      $('challengeA').value = challenge.options?.A || '';
+      $('challengeB').value = challenge.options?.B || '';
+      $('challengeC').value = challenge.options?.C || '';
+      $('challengeD').value = challenge.options?.D || '';
+      $('challengeCorrectLabel').value = challenge.correctLabel || '';
+      $('challengeExplanation').value = challenge.explanation || '';
+    }
+
+    async function salvarDesafio() {
+      const body = {
+        id: $('challengeId').value.trim() || undefined,
+        weekKey: $('challengeWeek').value.trim() || defaultWeekKey(),
+        number: Number($('challengeNumber').value || 0) || undefined,
+        question: $('challengeQuestion').value.trim(),
+        imageUrl: $('challengeImageUrl').value.trim(),
+        correctOption: $('challengeCorrect').value,
+        correctLabel: $('challengeCorrectLabel').value.trim(),
+        explanation: $('challengeExplanation').value.trim(),
+        options: {
+          A: $('challengeA').value.trim(),
+          B: $('challengeB').value.trim(),
+          C: $('challengeC').value.trim(),
+          D: $('challengeD').value.trim(),
+        },
+      };
+      const data = await api('/api/admin/spark/challenges', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      flash(data.message || 'Desafio salvo.');
+      carregarDesafioNoForm(data.challenge);
+      carregarDesafios();
+    }
+
+    async function publicarDesafioSelecionado() {
+      const id = $('challengeId').value.trim();
+      if (!id) return flash('Salve ou selecione um desafio primeiro.', true);
+      await publicarDesafio(id);
+    }
+
+    async function publicarDesafio(id) {
+      await api(`/api/admin/spark/challenges/${encodeURIComponent(id)}/publish`, { method: 'POST', body: '{}' });
+      const data = await api('/api/admin/spark/run/challenge', { method: 'POST', body: '{}' });
+      flash(formatResult(data), data.result && data.result.sent === false);
+      carregarDesafios();
+    }
+
+    async function publicarResposta(id) {
+      const data = await api(`/api/admin/spark/challenges/${encodeURIComponent(id)}/publish-answer`, {
+        method: 'POST',
+        body: '{}',
+      });
+      flash(formatResult(data), data.result && data.result.sent === false);
+      carregarDesafios();
+      carregarRespostas(id);
+    }
+
+    async function carregarRespostas(id) {
+      const data = await api(`/api/admin/spark/challenges/${encodeURIComponent(id)}/answers`);
+      $('answersList').innerHTML = `
+        <div class="item"><strong>Respostas: ${data.count || 0} · Acertos: ${data.correct || 0}</strong></div>
+        ${(data.answers || []).map((a) => `
+          <div class="item">
+            <span>${a.pushName || 'Sem nome'} · ${a.option} · ${a.correct ? 'acertou' : 'errou'}</span>
+            <span class="mono">${a.bonusKey || 'sem bonus'}</span>
+          </div>
+        `).join('')}
+      `;
     }
 
     function formatResult(data) {
@@ -561,6 +741,7 @@
           carregarConfig(),
           carregarGrupos(),
           carregarAdminsSpark(),
+          carregarDesafios(),
           carregarMembros(),
         ]);
       } catch (error) {

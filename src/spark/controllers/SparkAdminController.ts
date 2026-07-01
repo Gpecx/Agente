@@ -1,10 +1,11 @@
 import { Request, Response } from 'express';
 import { sparkConfig } from '../config/sparkConfig';
 import sparkAdminRepository from '../repositories/SparkAdminRepository';
+import sparkChallengeRepository from '../repositories/SparkChallengeRepository';
 import sparkMemberRepository from '../repositories/SparkMemberRepository';
 import sparkSettingsRepository from '../repositories/SparkSettingsRepository';
 import sparkCommunityOrchestrator from '../services/SparkCommunityOrchestrator';
-import { SparkSegmento, SparkUsageLevel } from '../interfaces/spark.interface';
+import { SparkChallengeOption, SparkSegmento, SparkUsageLevel } from '../interfaces/spark.interface';
 
 const SEGMENTOS_VALIDOS: SparkSegmento[] = ['A', 'B', 'C'];
 const USAGE_VALIDOS: SparkUsageLevel[] = ['unknown', 'high', 'low'];
@@ -152,12 +153,14 @@ class SparkAdminController {
 
   public updateMember = async (req: Request, res: Response): Promise<void> => {
     const { jid } = req.params;
-    const { segmento, usageLevel, temChave, trialEndsAt, pendingFlow } = req.body as {
+    const { segmento, usageLevel, temChave, hasExistingKey, appUsageCount, trialEndsAt, pendingFlow } = req.body as {
       segmento?: SparkSegmento;
       usageLevel?: SparkUsageLevel;
       temChave?: boolean;
+      hasExistingKey?: boolean;
+      appUsageCount?: number;
       trialEndsAt?: string;
-      pendingFlow?: 'technical_question' | 'low_usage_diagnosis' | null;
+      pendingFlow?: 'ask_existing_key' | 'ask_segment' | 'technical_question' | 'low_usage_diagnosis' | null;
     };
 
     if (!jid) {
@@ -193,8 +196,27 @@ class SparkAdminController {
       patch.temChave = !!temChave;
     }
 
+    if (hasExistingKey !== undefined) {
+      patch.hasExistingKey = !!hasExistingKey;
+    }
+
+    if (appUsageCount !== undefined) {
+      const usageCount = Number(appUsageCount);
+      if (!Number.isFinite(usageCount) || usageCount < 0) {
+        res.status(400).json({ error: 'appUsageCount deve ser um número maior ou igual a zero.' });
+        return;
+      }
+      patch.appUsageCount = Math.floor(usageCount);
+    }
+
     if (pendingFlow !== undefined) {
-      if (pendingFlow !== null && pendingFlow !== 'technical_question' && pendingFlow !== 'low_usage_diagnosis') {
+      if (
+        pendingFlow !== null &&
+        pendingFlow !== 'ask_existing_key' &&
+        pendingFlow !== 'ask_segment' &&
+        pendingFlow !== 'technical_question' &&
+        pendingFlow !== 'low_usage_diagnosis'
+      ) {
         res.status(400).json({ error: 'pendingFlow inválido.' });
         return;
       }
@@ -212,7 +234,8 @@ class SparkAdminController {
 
     if (Object.keys(patch).length === 0) {
       res.status(400).json({
-        error: 'Informe ao menos um campo para atualização: segmento, usageLevel, temChave, trialEndsAt, pendingFlow.',
+        error:
+          'Informe ao menos um campo para atualização: segmento, usageLevel, temChave, hasExistingKey, appUsageCount, trialEndsAt, pendingFlow.',
       });
       return;
     }
@@ -227,6 +250,122 @@ class SparkAdminController {
     } catch (error) {
       console.error('❌ [SparkAdminController] Erro ao atualizar membro Spark:', error);
       res.status(500).json({ error: 'Erro interno ao atualizar membro Spark.' });
+    }
+  };
+
+  public setMemberUsage = async (req: Request, res: Response): Promise<void> => {
+    const { jid } = req.params;
+    const usageCount = Number(req.body?.appUsageCount);
+
+    if (!jid || !Number.isFinite(usageCount) || usageCount < 0) {
+      res.status(400).json({ error: 'Informe jid e appUsageCount >= 0.' });
+      return;
+    }
+
+    try {
+      await sparkMemberRepository.setAppUsageCount(jid, usageCount);
+      const member = await sparkMemberRepository.get(jid);
+      res.status(200).json({ message: 'Uso do app atualizado.', member: member ? this.serialize(member) : null });
+    } catch (error) {
+      console.error('❌ [SparkAdminController] Erro ao atualizar uso Spark:', error);
+      res.status(500).json({ error: 'Erro interno ao atualizar uso do app.' });
+    }
+  };
+
+  public listChallenges = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const challenges = await sparkChallengeRepository.list(50);
+      res.status(200).json({ count: challenges.length, challenges });
+    } catch (error) {
+      console.error('❌ [SparkAdminController] Erro ao listar desafios:', error);
+      res.status(500).json({ error: 'Erro interno ao listar desafios.' });
+    }
+  };
+
+  public getActiveChallenge = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const weekKey = this.weekKey(new Date());
+      const challenge = await sparkChallengeRepository.findByWeekAndStatus(weekKey, 'open');
+      res.status(200).json({ challenge });
+    } catch (error) {
+      console.error('❌ [SparkAdminController] Erro ao buscar desafio ativo:', error);
+      res.status(500).json({ error: 'Erro interno ao buscar desafio ativo.' });
+    }
+  };
+
+  public upsertChallenge = async (req: Request, res: Response): Promise<void> => {
+    const body = req.body || {};
+    const correctOption = String(body.correctOption || '').toUpperCase() as SparkChallengeOption;
+    const options = body.options || {};
+
+    if (!body.weekKey || !body.question || !['A', 'B', 'C', 'D'].includes(correctOption)) {
+      res.status(400).json({ error: 'Informe weekKey, question e correctOption A/B/C/D.' });
+      return;
+    }
+
+    for (const option of ['A', 'B', 'C', 'D'] as SparkChallengeOption[]) {
+      if (typeof options[option] !== 'string' || !options[option].trim()) {
+        res.status(400).json({ error: `Informe options.${option}.` });
+        return;
+      }
+    }
+
+    try {
+      const challenge = await sparkChallengeRepository.upsert({
+        id: typeof body.id === 'string' && body.id.trim() ? body.id.trim() : undefined,
+        number: Number.isFinite(Number(body.number)) ? Number(body.number) : undefined,
+        weekKey: String(body.weekKey).trim(),
+        status: body.status,
+        question: String(body.question).trim(),
+        imageUrl: typeof body.imageUrl === 'string' ? body.imageUrl.trim() : undefined,
+        options,
+        correctOption,
+        correctLabel: String(body.correctLabel || options[correctOption]).trim(),
+        explanation: String(body.explanation || '').trim(),
+      });
+      res.status(200).json({ message: 'Desafio Spark salvo.', challenge });
+    } catch (error) {
+      console.error('❌ [SparkAdminController] Erro ao salvar desafio:', error);
+      res.status(500).json({ error: 'Erro interno ao salvar desafio.' });
+    }
+  };
+
+  public publishChallenge = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const challenge = await sparkChallengeRepository.publish(req.params.id);
+      res.status(200).json({ message: 'Desafio marcado como aberto.', challenge });
+    } catch (error) {
+      console.error('❌ [SparkAdminController] Erro ao publicar desafio:', error);
+      res.status(500).json({ error: 'Erro interno ao publicar desafio.' });
+    }
+  };
+
+  public publishChallengeAnswer = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const challenge = await sparkChallengeRepository.get(req.params.id);
+      if (!challenge) {
+        res.status(404).json({ error: 'Desafio não encontrado.' });
+        return;
+      }
+      const result = await sparkCommunityOrchestrator.sendWeeklyAnswerAndBonus(req.params.id);
+      res.status(200).json({ message: 'Resultado do desafio processado.', result });
+    } catch (error) {
+      console.error('❌ [SparkAdminController] Erro ao publicar resposta do desafio:', error);
+      res.status(500).json({ error: 'Erro interno ao publicar resposta do desafio.' });
+    }
+  };
+
+  public listChallengeAnswers = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const answers = await sparkChallengeRepository.listAnswers(req.params.id);
+      res.status(200).json({
+        count: answers.length,
+        correct: answers.filter((answer) => answer.correct).length,
+        answers,
+      });
+    } catch (error) {
+      console.error('❌ [SparkAdminController] Erro ao listar respostas:', error);
+      res.status(500).json({ error: 'Erro interno ao listar respostas.' });
     }
   };
 
@@ -275,10 +414,27 @@ class SparkAdminController {
       chaveEntregueEm: member.chaveEntregueEm?.toISOString(),
       joinedAt: member.joinedAt?.toISOString(),
       lastInteractionAt: member.lastInteractionAt?.toISOString(),
+      lastMenuAt: member.lastMenuAt?.toISOString(),
+      lastChallengeAnswerAt: member.lastChallengeAnswerAt?.toISOString(),
       trialEndsAt: member.trialEndsAt?.toISOString(),
       lastInactivityPromptAt: member.lastInactivityPromptAt?.toISOString(),
       lastExpiryPromptAt: member.lastExpiryPromptAt?.toISOString(),
+      generatedKeys: Array.isArray(member.generatedKeys)
+        ? member.generatedKeys.map((key: any) => ({
+            ...key,
+            createdAt: key.createdAt?.toISOString(),
+          }))
+        : [],
     };
+  }
+
+  private weekKey(date: Date): string {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+      d.getDate()
+    ).padStart(2, '0')}`;
   }
 }
 

@@ -1,10 +1,16 @@
 import { EvolutionWebhookPayload } from '../../interfaces/evolution.interface';
 import { sparkConfig } from '../config/sparkConfig';
 import sparkAdminRepository from '../repositories/SparkAdminRepository';
+import sparkChallengeRepository from '../repositories/SparkChallengeRepository';
 import sparkMemberRepository from '../repositories/SparkMemberRepository';
 import sparkSettingsRepository from '../repositories/SparkSettingsRepository';
 import messaging from './SparkMessagingService';
-import { SparkUsageLevel } from '../interfaces/spark.interface';
+import {
+  SparkChallenge,
+  SparkChallengeOption,
+  SparkSegmento,
+  SparkUsageLevel,
+} from '../interfaces/spark.interface';
 
 export interface SparkRunResult {
   sent: boolean;
@@ -12,6 +18,9 @@ export interface SparkRunResult {
   reason?: string;
   bonusSent?: number;
   bonusSkipped?: number;
+  challengeId?: string;
+  answers?: number;
+  correctAnswers?: number;
   inactivitySent?: number;
   expirySent?: number;
 }
@@ -34,6 +43,7 @@ class SparkCommunityOrchestrator {
   ];
   private readonly SUPPORT_KEYWORDS = ['ajuda', 'suporte', 'especialista', 'humano'];
   private readonly KEY_KEYWORDS = ['chave', 'ativacao', 'ativar', 'acesso'];
+  private readonly MATERIAL_KEYWORDS = ['material', 'estudo', 'apostila', 'conteudo'];
 
   private isGroup(jid: string): boolean {
     return jid.endsWith('@g.us');
@@ -69,8 +79,37 @@ class SparkCommunityOrchestrator {
     ).padStart(2, '0')}`;
   }
 
+  private generateKey(prefix: string): string {
+    const suffix = Math.random().toString(36).slice(2, 8).toUpperCase();
+    return `${prefix}-${suffix}`;
+  }
+
+  private isYes(text: string): boolean {
+    const normalized = this.normalize(text);
+    return ['sim', 's', 'tenho', 'ja tenho', 'tenho sim'].includes(normalized);
+  }
+
+  private isNo(text: string): boolean {
+    const normalized = this.normalize(text);
+    return ['nao', 'não', 'n', 'nao tenho', 'não tenho'].includes(normalized);
+  }
+
+  private parseSegment(text: string): SparkSegmento | null {
+    const normalized = this.normalize(text).replace(/[^abc]/g, '');
+    if (normalized === 'a' || normalized === 'b' || normalized === 'c') return normalized.toUpperCase() as SparkSegmento;
+    return null;
+  }
+
+  private parseChallengeOption(text: string): SparkChallengeOption | null {
+    const normalized = this.normalize(text).trim();
+    if (['a', 'b', 'c', 'd'].includes(normalized)) return normalized.toUpperCase() as SparkChallengeOption;
+    return null;
+  }
+
   private async sendKeyFlow(instance: string, jid: string, segmento: 'A' | 'B' | 'C'): Promise<void> {
-    await messaging.enviarDM(instance, jid, this.buildKeyText(segmento));
+    const code = this.generateKey('SPARK');
+    await messaging.enviarDM(instance, jid, this.buildKeyText(segmento, code));
+    await sparkMemberRepository.addGeneratedKey(jid, { type: 'trial', code, reason: 'trial' });
     await sparkMemberRepository.markKeyDelivered(jid);
   }
 
@@ -80,29 +119,154 @@ class SparkCommunityOrchestrator {
     autorJid: string,
     segmento: 'A' | 'B' | 'C'
   ): Promise<void> {
-    await messaging.enviarGrupo(instance, remoteJid, this.buildKeyText(segmento));
+    const code = this.generateKey('SPARK');
+    await messaging.enviarGrupo(instance, remoteJid, this.buildKeyText(segmento, code));
+    await sparkMemberRepository.addGeneratedKey(autorJid, { type: 'trial', code, reason: 'trial' });
     await sparkMemberRepository.markKeyDelivered(autorJid);
   }
 
-  private buildKeyText(segmento: 'A' | 'B' | 'C'): string {
-    const ativacao = sparkConfig.activationUrl ? `\nAtive aqui: ${sparkConfig.activationUrl}` : '';
+  private buildKeyText(segmento: 'A' | 'B' | 'C', code = sparkConfig.defaultKey): string {
+    const appUrl = sparkConfig.appUrl || 'spark.voltsmind.com.br';
     return [
-      `Seu acesso Spark foi preparado no segmento *${segmento}*.`,
-      `Chave: *${sparkConfig.defaultKey}*`,
-      ativacao.trim(),
+      '🔑 Sua chave de acesso — *14 dias grátis:*',
       '',
-      sparkConfig.mainMenuText,
+      `\`${code}\``,
+      '',
+      'Como ativar:',
+      `1. Baixe: ${appUrl}`,
+      '2. Crie sua conta',
+      '3. Configurações → *Ativar licença* → cole a chave',
+      '',
+      `Segmento: *${segmento}*`,
+      'Qualquer dúvida, manda mensagem aqui. ⚡',
     ]
       .filter(Boolean)
       .join('\n');
   }
 
+  private buildWelcomeQuestion(numero?: string): string {
+    const mention = numero ? `@${numero} ` : '';
+    return [
+      `${mention}⚡ Bem-vindo(a) à comunidade SPARK!`,
+      '',
+      'Aqui você pratica, aprende e domina proteção de sistemas elétricos com quem vive isso no dia a dia.',
+      '',
+      'Você já tem sua chave de acesso ao app?',
+      '',
+      'Responda *SIM* ou *NÃO*.',
+    ].join('\n');
+  }
+
+  private buildSegmentQuestion(): string {
+    return [
+      'Me conta: você é...',
+      '',
+      '🎓 *A* — Estudante de engenharia',
+      '🔧 *B* — Técnico ou profissional de proteção',
+      '🏢 *C* — Empresa / uso corporativo',
+    ].join('\n');
+  }
+
+  private buildMainMenu(): string {
+    return [
+      'O que você precisa?',
+      '',
+      '1️⃣ Minha chave de acesso',
+      '2️⃣ Planos e preços',
+      '3️⃣ Desafio técnico',
+      '4️⃣ Falar com especialista',
+      '5️⃣ Material de estudo',
+    ].join('\n');
+  }
+
+  private buildPlansText(): string {
+    return [
+      '💳 *Planos SPARK:*',
+      '',
+      '🎓 *Student* — R$19,90/mês',
+      'Para estudantes | Simulador + exercícios',
+      '',
+      '⚡ *Pro* — R$39,90/mês',
+      'Para profissionais | + análise de curvas + relatórios',
+      '',
+      '🏆 *Premium* — R$79,90/mês',
+      'Para equipes | + multi-usuário + suporte prioritário',
+      '',
+      '📅 Anual: *17% de desconto* em todos os planos',
+      '',
+      `👉 ${sparkConfig.plansUrl || 'spark.voltsmind.com.br/planos'}`,
+    ].join('\n');
+  }
+
+  private buildMaterialText(): string {
+    const appUrl = sparkConfig.appUrl || 'spark.voltsmind.com.br';
+    return `📚 Material de estudo SPARK: acesse os exercícios e casos práticos em ${appUrl}`;
+  }
+
+  private buildChallengeText(challenge: SparkChallenge): string {
+    return [
+      `⚡ *Desafio da Semana #${challenge.number}*`,
+      '',
+      challenge.imageUrl ? `[imagem: ${challenge.imageUrl}]` : '',
+      challenge.question,
+      '',
+      `*A* — ${challenge.options.A}`,
+      `*B* — ${challenge.options.B}`,
+      `*C* — ${challenge.options.C}`,
+      `*D* — ${challenge.options.D}`,
+      '',
+      '🏆 Quem acertar recebe 7 dias extras no SPARK.',
+      'Responde aqui: A, B, C ou D 👇',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  private buildChallengeResultText(
+    challenge: SparkChallenge,
+    correctCount: number,
+    firstCorrectName: string
+  ): string {
+    return [
+      `📊 *Resultado do Desafio #${challenge.number}*`,
+      '',
+      `✅ Resposta certa: *${challenge.correctOption} — ${challenge.correctLabel}*`,
+      '',
+      challenge.explanation,
+      '',
+      `🏆 Acertaram: *${correctCount} membros*`,
+      `⚡ Primeiro a responder: *${firstCorrectName || 'n/d'}*`,
+      '',
+      'Veja a análise completa no app 📲',
+    ].join('\n');
+  }
+
+  private buildDefaultChallenge(weekKey: string, number: number): SparkChallenge {
+    return {
+      id: '',
+      number,
+      weekKey,
+      status: 'draft',
+      question: 'Qual o tipo de falta nesta curva?',
+      options: {
+        A: 'Monofásica-terra',
+        B: 'Bifásica',
+        C: 'Bifásica-terra',
+        D: 'Trifásica',
+      },
+      correctOption: 'A',
+      correctLabel: 'Monofásica-terra',
+      explanation:
+        'A corrente de uma fase cresce de forma predominante em relação às demais. Em campo, isso indica caminho de falta envolvendo fase e terra.',
+    };
+  }
+
   private async sendMainMenu(instance: string, jid: string): Promise<void> {
-    await messaging.enviarDM(instance, jid, sparkConfig.mainMenuText);
+    await messaging.enviarDM(instance, jid, this.buildMainMenu());
   }
 
   private isMenuShortcut(text: string): boolean {
-    return text === 'spark' || text === '/spark';
+    return text === 'spark' || text === '/spark' || text === 'menu';
   }
 
   private isSparkIntentText(text: string | null): boolean {
@@ -114,7 +278,8 @@ class SparkCommunityOrchestrator {
       this.isAdminCommand(normalized) ||
       this.PLAN_KEYWORDS.some((keyword) => normalized.includes(keyword)) ||
       this.SUPPORT_KEYWORDS.some((keyword) => normalized.includes(keyword)) ||
-      this.KEY_KEYWORDS.some((keyword) => normalized.includes(keyword))
+      this.KEY_KEYWORDS.some((keyword) => normalized.includes(keyword)) ||
+      this.MATERIAL_KEYWORDS.some((keyword) => normalized.includes(keyword))
     );
   }
 
@@ -404,13 +569,12 @@ class SparkCommunityOrchestrator {
   ): Promise<boolean> {
     const normalized = this.normalize(text);
 
-    if (this.PLAN_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
-      const suffix = sparkConfig.plansUrl ? `\n${sparkConfig.plansUrl}` : '';
-      await this.responderNoCanal(instance, remoteJid, autorJid, `${sparkConfig.plansText}${suffix}`);
+    if (normalized === '2' || this.PLAN_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
+      await this.responderNoCanal(instance, remoteJid, autorJid, this.buildPlansText());
       return true;
     }
 
-    if (this.KEY_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
+    if (normalized === '1' || this.KEY_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
       const member = await sparkMemberRepository.get(autorJid);
       if (!member) return false;
       if (this.isGroup(remoteJid)) {
@@ -421,8 +585,26 @@ class SparkCommunityOrchestrator {
       return true;
     }
 
-    if (this.SUPPORT_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
+    if (normalized === '3' || normalized.includes('desafio')) {
+      const active = await sparkChallengeRepository.findByWeekAndStatus(this.weekKey(new Date()), 'open');
+      await this.responderNoCanal(
+        instance,
+        remoteJid,
+        autorJid,
+        active
+          ? this.buildChallengeText(active)
+          : 'Ainda nao ha desafio aberto nesta semana. Fica de olho: toda terca tem desafio novo. ⚡'
+      );
+      return true;
+    }
+
+    if (normalized === '4' || this.SUPPORT_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
       await this.responderNoCanal(instance, remoteJid, autorJid, sparkConfig.helpText);
+      return true;
+    }
+
+    if (normalized === '5' || this.MATERIAL_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
+      await this.responderNoCanal(instance, remoteJid, autorJid, this.buildMaterialText());
       return true;
     }
 
@@ -431,11 +613,71 @@ class SparkCommunityOrchestrator {
 
   private async handlePendingFlow(
     instance: string,
+    remoteJid: string,
     autorJid: string,
     text: string
   ): Promise<boolean> {
     const member = await sparkMemberRepository.get(autorJid);
     if (!member?.pendingFlow) return false;
+
+    if (member.pendingFlow === 'ask_existing_key') {
+      if (this.isYes(text)) {
+        await sparkMemberRepository.save(autorJid, {
+          hasExistingKey: true,
+          temChave: true,
+          pendingFlow: null,
+        });
+        await this.responderNoCanal(instance, remoteJid, autorJid, this.buildMainMenu());
+        await sparkMemberRepository.markMenuSent(autorJid);
+        return true;
+      }
+
+      if (this.isNo(text)) {
+        await sparkMemberRepository.save(autorJid, {
+          hasExistingKey: false,
+          pendingFlow: 'ask_segment',
+        });
+        setTimeout(() => {
+          this.responderNoCanal(instance, remoteJid, autorJid, this.buildSegmentQuestion()).catch((error) =>
+            console.error('❌ [Spark] Falha ao enviar segmentacao:', error)
+          );
+        }, 3000);
+        return true;
+      }
+
+      await this.responderNoCanal(instance, remoteJid, autorJid, 'Responde com *SIM* ou *NÃO* pra eu seguir. ⚡');
+      return true;
+    }
+
+    if (member.pendingFlow === 'ask_segment') {
+      const segmento = this.parseSegment(text);
+      if (!segmento) {
+        await this.responderNoCanal(instance, remoteJid, autorJid, this.buildSegmentQuestion());
+        return true;
+      }
+
+      await sparkMemberRepository.save(autorJid, {
+        segmento,
+        pendingFlow: null,
+      });
+
+      if (segmento === 'C') {
+        await this.responderNoCanal(
+          instance,
+          remoteJid,
+          autorJid,
+          'Perfeito! Um especialista vai entrar em contato em breve. 👍'
+        );
+        return true;
+      }
+
+      if (this.isGroup(remoteJid)) {
+        await this.sendKeyFlowNoCanal(instance, remoteJid, autorJid, segmento);
+      } else {
+        await this.sendKeyFlow(instance, autorJid, segmento);
+      }
+      return true;
+    }
 
     if (member.pendingFlow === 'technical_question') {
       const cta = sparkConfig.appUrl ? `\n${sparkConfig.appUrl}` : '';
@@ -477,6 +719,34 @@ class SparkCommunityOrchestrator {
     return !!(texto && (await sparkMemberRepository.get(remoteJid)));
   }
 
+  private async handleChallengeAnswer(
+    instance: string,
+    remoteJid: string,
+    autorJid: string,
+    pushName: string,
+    text: string
+  ): Promise<boolean> {
+    if (!this.isGroup(remoteJid)) return false;
+    const option = this.parseChallengeOption(text);
+    if (!option) return false;
+
+    const challenge = await sparkChallengeRepository.findByWeekAndStatus(this.weekKey(new Date()), 'open');
+    if (!challenge) return false;
+
+    const { created } = await sparkChallengeRepository.recordAnswer({
+      challenge,
+      memberJid: autorJid,
+      pushName,
+      option,
+    });
+
+    if (created) {
+      await sparkMemberRepository.markChallengeParticipation(autorJid, challenge.weekKey);
+    }
+
+    return true;
+  }
+
   async onMessage(payload: EvolutionWebhookPayload, texto: string | null): Promise<void> {
     if (!sparkConfig.enabled || !texto) return;
 
@@ -494,7 +764,7 @@ class SparkCommunityOrchestrator {
     if (this.isGroup(remoteJid)) {
       if (!isSparkGroup) return;
 
-      const member = await sparkMemberRepository.ensure(
+      let member = await sparkMemberRepository.ensure(
         autorJid,
         pushName,
         this.computeSegment(autorJid),
@@ -502,29 +772,44 @@ class SparkCommunityOrchestrator {
       );
       await sparkMemberRepository.touchInteraction(autorJid, pushName);
 
+      if (!member.pendingFlow && !member.temChave && member.hasExistingKey === undefined) {
+        await sparkMemberRepository.save(autorJid, { pendingFlow: 'ask_existing_key' });
+        await messaging.enviarGrupoComMencao(
+          payload.instance,
+          remoteJid,
+          this.buildWelcomeQuestion(autorJid.split('@')[0]),
+          autorJid
+        );
+        return;
+      }
+
+      member = (await sparkMemberRepository.get(autorJid)) || member;
+      if (await this.handlePendingFlow(payload.instance, remoteJid, autorJid, texto)) return;
+
       if (this.isMenuShortcut(this.normalize(texto))) {
-        await messaging.enviarGrupo(payload.instance, remoteJid, sparkConfig.mainMenuText);
+        await messaging.enviarGrupo(payload.instance, remoteJid, this.buildMainMenu());
+        await sparkMemberRepository.markMenuSent(autorJid);
         return;
       }
 
       const handled = await this.handleKeyword(payload.instance, remoteJid, autorJid, texto);
-      if (!handled) {
-        const today = new Date().getDay();
-        if (today === 2 || today === 3 || today === 4) {
-          await sparkMemberRepository.markChallengeParticipation(autorJid, this.weekKey(new Date()));
-        }
+      if (handled) {
+        return;
       }
 
-      if (!member.temChave) {
-        await this.sendKeyFlowNoCanal(payload.instance, remoteJid, autorJid, member.segmento);
+      if (await this.handleChallengeAnswer(payload.instance, remoteJid, autorJid, pushName, texto)) {
+        return;
       }
+
+      await messaging.enviarGrupo(payload.instance, remoteJid, this.buildMainMenu());
+      await sparkMemberRepository.markMenuSent(autorJid);
       return;
     }
 
     const normalized = this.normalize(texto);
     const member = await this.ensureMember(autorJid, pushName);
 
-    if (await this.handlePendingFlow(payload.instance, autorJid, texto)) return;
+    if (await this.handlePendingFlow(payload.instance, remoteJid, autorJid, texto)) return;
     if (await this.handleKeyword(payload.instance, remoteJid, autorJid, texto)) {
       await sparkMemberRepository.touchInteraction(autorJid, pushName);
       return;
@@ -533,6 +818,7 @@ class SparkCommunityOrchestrator {
     if (this.isMenuShortcut(normalized)) {
       await sparkMemberRepository.touchInteraction(autorJid, pushName);
       await this.sendMainMenu(payload.instance, autorJid);
+      await sparkMemberRepository.markMenuSent(autorJid);
       return;
     }
 
@@ -555,41 +841,21 @@ class SparkCommunityOrchestrator {
     if (!remoteJid || remoteJid !== settings.groupJid || participants.length === 0) return;
 
     for (const jid of participants) {
-      const member = await sparkMemberRepository.ensure(
+      await sparkMemberRepository.ensure(
         jid,
         payload.data?.pushName || '',
         this.computeSegment(jid),
         this.trialEndsAt(new Date())
       );
+      await sparkMemberRepository.save(jid, { pendingFlow: 'ask_existing_key' });
 
       const numero = jid.split('@')[0];
-      if (settings.dmEnabled) {
-        await messaging.enviarGrupoComMencao(
-          payload.instance,
-          remoteJid,
-          `@${numero} bem-vindo(a) ao Spark. Vou te mandar sua chave e o menu principal no privado agora.`,
-          jid
-        );
-
-        if (member.temChave) {
-          await this.sendMainMenu(payload.instance, jid);
-        } else {
-          await this.sendKeyFlow(payload.instance, jid, member.segmento);
-        }
-        continue;
-      }
-
       await messaging.enviarGrupoComMencao(
         payload.instance,
         remoteJid,
-        `@${numero} bem-vindo(a) ao Spark. O atendimento por DM esta desativado, entao vou manter tudo aqui no grupo.`,
+        this.buildWelcomeQuestion(numero),
         jid
       );
-      if (member.temChave) {
-        await messaging.enviarGrupo(payload.instance, remoteJid, sparkConfig.mainMenuText);
-      } else {
-        await this.sendKeyFlowNoCanal(payload.instance, remoteJid, jid, member.segmento);
-      }
     }
   }
 
@@ -599,55 +865,80 @@ class SparkCommunityOrchestrator {
     if (!sparkConfig.evolutionInstance) return { sent: false, reason: 'EVOLUTION_INSTANCE nao configurado' };
     if (!groupJid) return { sent: false, reason: 'Grupo Spark nao configurado' };
 
-    await messaging.enviarGrupo(
-      sparkConfig.evolutionInstance,
-      groupJid,
-      sparkConfig.challengeText
-    );
-    return { sent: true, target: groupJid };
+    const weekKey = this.weekKey(new Date());
+    let challenge =
+      (await sparkChallengeRepository.findByWeekAndStatus(weekKey, 'open')) ||
+      (await sparkChallengeRepository.findByWeekAndStatus(weekKey, 'draft'));
+
+    if (!challenge) {
+      challenge = await sparkChallengeRepository.upsert(
+        this.buildDefaultChallenge(weekKey, await sparkChallengeRepository.nextNumber())
+      );
+    }
+
+    challenge = (await sparkChallengeRepository.publish(challenge.id)) || challenge;
+    const text = this.buildChallengeText(challenge);
+
+    if (challenge.imageUrl) {
+      await messaging.enviarImagemGrupo(sparkConfig.evolutionInstance, groupJid, challenge.imageUrl, text);
+    } else {
+      await messaging.enviarGrupo(sparkConfig.evolutionInstance, groupJid, text);
+    }
+
+    return { sent: true, target: groupJid, challengeId: challenge.id };
   }
 
-  async sendWeeklyAnswerAndBonus(): Promise<SparkRunResult> {
+  async sendWeeklyAnswerAndBonus(challengeId?: string): Promise<SparkRunResult> {
     const settings = await this.getRuntimeSettings();
     if (!sparkConfig.enabled) return { sent: false, reason: 'Spark desativado' };
     if (!sparkConfig.evolutionInstance) return { sent: false, reason: 'EVOLUTION_INSTANCE nao configurado' };
     if (!settings.groupJid) return { sent: false, reason: 'Grupo Spark nao configurado' };
 
     const weekKey = this.weekKey(new Date());
-    await messaging.enviarGrupo(
-      sparkConfig.evolutionInstance,
-      settings.groupJid,
-      sparkConfig.challengeAnswerText
-    );
+    const challenge = challengeId
+      ? await sparkChallengeRepository.get(challengeId)
+      : await sparkChallengeRepository.findByWeekAndStatus(weekKey, 'open');
+    if (!challenge) return { sent: false, reason: 'Nenhum desafio aberto nesta semana' };
 
-    const participants = await sparkMemberRepository.listChallengeParticipants(weekKey);
+    const answers = await sparkChallengeRepository.listAnswers(challenge.id);
+    const correctAnswers = answers.filter((answer) => answer.correct);
+    const firstCorrect = correctAnswers[0];
     let bonusSent = 0;
     let bonusSkipped = 0;
 
-    for (const member of participants) {
-      if (member.lastBonusWeekSent === weekKey) {
+    for (const answer of correctAnswers) {
+      if (answer.bonusKey) {
         bonusSkipped += 1;
         continue;
       }
-      if (!settings.dmEnabled) {
-        bonusSkipped += 1;
-        continue;
-      }
-      await messaging.enviarDM(
-        sparkConfig.evolutionInstance,
-        member.jid,
-        sparkConfig.challengeBonusText
-      );
-      await sparkMemberRepository.markBonusSent(member.jid, weekKey);
+      const code = this.generateKey('SPARK-BONUS');
+      await sparkChallengeRepository.markBonus(answer.id, code);
+      await sparkMemberRepository.addGeneratedKey(answer.memberJid, {
+        type: 'bonus',
+        code,
+        reason: `challenge:${challenge.id}`,
+        challengeId: challenge.id,
+      });
+      await sparkMemberRepository.markBonusSent(answer.memberJid, weekKey);
       bonusSent += 1;
     }
+
+    await messaging.enviarGrupo(
+      sparkConfig.evolutionInstance,
+      settings.groupJid,
+      this.buildChallengeResultText(challenge, correctAnswers.length, firstCorrect?.pushName || '')
+    );
+    await sparkChallengeRepository.markAnswered(challenge.id);
 
     return {
       sent: true,
       target: settings.groupJid,
+      challengeId: challenge.id,
+      answers: answers.length,
+      correctAnswers: correctAnswers.length,
       bonusSent,
       bonusSkipped,
-      reason: settings.dmEnabled ? undefined : 'DM desativada: bonus privados foram pulados',
+      reason: 'Bonus gerados e registrados; envio por DM fica desativado no v1',
     };
   }
 

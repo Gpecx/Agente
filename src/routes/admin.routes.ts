@@ -103,6 +103,27 @@ router.get('/spark/members/:jid', SparkAdminController.getMember);
 // POST /admin/spark/members/:jid → ajusta estado operacional do membro
 router.post('/spark/members/:jid', SparkAdminController.updateMember);
 
+// POST /admin/spark/members/:jid/usage → atualiza uso manual do app
+router.post('/spark/members/:jid/usage', SparkAdminController.setMemberUsage);
+
+// GET /admin/spark/challenges → lista desafios Spark
+router.get('/spark/challenges', SparkAdminController.listChallenges);
+
+// POST /admin/spark/challenges → cria/atualiza desafio Spark
+router.post('/spark/challenges', SparkAdminController.upsertChallenge);
+
+// GET /admin/spark/challenges/active → desafio aberto da semana
+router.get('/spark/challenges/active', SparkAdminController.getActiveChallenge);
+
+// POST /admin/spark/challenges/:id/publish → marca desafio como aberto
+router.post('/spark/challenges/:id/publish', SparkAdminController.publishChallenge);
+
+// POST /admin/spark/challenges/:id/publish-answer → publica resultado do desafio
+router.post('/spark/challenges/:id/publish-answer', SparkAdminController.publishChallengeAnswer);
+
+// GET /admin/spark/challenges/:id/answers → lista respostas do desafio
+router.get('/spark/challenges/:id/answers', SparkAdminController.listChallengeAnswers);
+
 // POST /admin/spark/run/challenge → dispara o desafio semanal agora
 router.post('/spark/run/challenge', SparkAdminController.runChallengeNow);
 

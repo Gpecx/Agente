@@ -33,14 +33,26 @@ vi.mock('../config/sparkConfig', () => ({
   },
 }));
 
-const { adminRepo, repo, settingsRepo, messaging } = vi.hoisted(() => ({
+const { adminRepo, challengeRepo, repo, settingsRepo, messaging } = vi.hoisted(() => ({
   adminRepo: {
     isAdmin: vi.fn(),
+  },
+  challengeRepo: {
+    findByWeekAndStatus: vi.fn(),
+    upsert: vi.fn(),
+    nextNumber: vi.fn(),
+    publish: vi.fn(),
+    listAnswers: vi.fn(),
+    recordAnswer: vi.fn(),
+    markBonus: vi.fn(),
+    markAnswered: vi.fn(),
   },
   repo: {
     get: vi.fn(),
     ensure: vi.fn(),
     touchInteraction: vi.fn(),
+    markMenuSent: vi.fn(),
+    addGeneratedKey: vi.fn(),
     markKeyDelivered: vi.fn(),
     setUsageLevel: vi.fn(),
     save: vi.fn(),
@@ -59,6 +71,7 @@ const { adminRepo, repo, settingsRepo, messaging } = vi.hoisted(() => ({
     enviarDM: vi.fn(),
     enviarGrupo: vi.fn(),
     enviarGrupoComMencao: vi.fn(),
+    enviarImagemGrupo: vi.fn(),
   },
 }));
 
@@ -70,6 +83,10 @@ vi.mock('../repositories/SparkAdminRepository', () => ({
   default: adminRepo,
 }));
 
+vi.mock('../repositories/SparkChallengeRepository', () => ({
+  default: challengeRepo,
+}));
+
 vi.mock('../repositories/SparkSettingsRepository', () => ({
   default: settingsRepo,
 }));
@@ -79,6 +96,23 @@ vi.mock('./SparkMessagingService', () => ({
 }));
 
 import sparkCommunityOrchestrator from './SparkCommunityOrchestrator';
+
+const challenge = {
+  id: 'challenge-1',
+  number: 1,
+  weekKey: '2026-06-29',
+  status: 'open',
+  question: 'Qual o tipo de falta nesta curva?',
+  options: {
+    A: 'Monofásica-terra',
+    B: 'Bifásica',
+    C: 'Bifásica-terra',
+    D: 'Trifásica',
+  },
+  correctOption: 'A',
+  correctLabel: 'Monofásica-terra',
+  explanation: 'Explicação técnica.',
+} as any;
 
 const payload = (jid: string, text = 'oi', pushName = 'Teste') =>
   ({
@@ -115,7 +149,8 @@ describe('SparkCommunityOrchestrator', () => {
       jid,
       pushName,
       segmento,
-      temChave: false,
+      hasExistingKey: true,
+      temChave: true,
       usageLevel: 'unknown',
       pendingFlow: null,
     }));
@@ -124,6 +159,11 @@ describe('SparkCommunityOrchestrator', () => {
       groupJid: '120363427851443399@g.us',
     });
     adminRepo.isAdmin.mockResolvedValue(false);
+    challengeRepo.findByWeekAndStatus.mockResolvedValue(null);
+    challengeRepo.nextNumber.mockResolvedValue(1);
+    challengeRepo.upsert.mockResolvedValue(challenge);
+    challengeRepo.publish.mockResolvedValue(challenge);
+    challengeRepo.listAnswers.mockResolvedValue([]);
   });
 
   it('mantem Spark desligado para mensagens privadas', async () => {
@@ -174,7 +214,7 @@ describe('SparkCommunityOrchestrator', () => {
     expect(messaging.enviarGrupo).toHaveBeenCalledWith(
       'instancia-teste',
       '120363427851443399@g.us',
-      'Menu Spark'
+      expect.stringContaining('O que você precisa?')
     );
     expect(messaging.enviarDM).not.toHaveBeenCalled();
   });
@@ -188,27 +228,37 @@ describe('SparkCommunityOrchestrator', () => {
     expect(messaging.enviarGrupo).toHaveBeenCalledWith(
       'instancia-teste',
       '120363427851443399@g.us',
-      'Planos Spark\nhttps://example.com/planos'
+      expect.stringContaining('💳 *Planos SPARK:*')
     );
     expect(messaging.enviarDM).not.toHaveBeenCalled();
   });
 
   it('dispara desafio semanal no grupo Spark configurado pelo painel', async () => {
-    await expect(sparkCommunityOrchestrator.sendWeeklyChallenge()).resolves.toEqual({
+    await expect(sparkCommunityOrchestrator.sendWeeklyChallenge()).resolves.toMatchObject({
       sent: true,
       target: '120363427851443399@g.us',
+      challengeId: 'challenge-1',
     });
 
     expect(messaging.enviarGrupo).toHaveBeenCalledWith(
       'instancia-teste',
       '120363427851443399@g.us',
-      'Desafio'
+      expect.stringContaining('⚡ *Desafio da Semana #1*')
     );
   });
 
-  it('pula bonus privado quando DM esta desabilitada, mas envia resposta no grupo', async () => {
-    repo.listChallengeParticipants.mockResolvedValue([
-      { jid: '5511888888888@s.whatsapp.net', lastBonusWeekSent: undefined },
+  it('gera bonus internamente quando DM esta desabilitada, mas envia resposta no grupo', async () => {
+    challengeRepo.findByWeekAndStatus.mockResolvedValue(challenge);
+    challengeRepo.listAnswers.mockResolvedValue([
+      {
+        id: 'answer-1',
+        challengeId: 'challenge-1',
+        weekKey: challenge.weekKey,
+        memberJid: '5511888888888@s.whatsapp.net',
+        pushName: 'Teste',
+        option: 'A',
+        correct: true,
+      },
     ]);
 
     const result = await sparkCommunityOrchestrator.sendWeeklyAnswerAndBonus();
@@ -216,18 +266,38 @@ describe('SparkCommunityOrchestrator', () => {
     expect(result).toMatchObject({
       sent: true,
       target: '120363427851443399@g.us',
-      bonusSent: 0,
-      bonusSkipped: 1,
+      bonusSent: 1,
+      correctAnswers: 1,
     });
     expect(messaging.enviarGrupo).toHaveBeenCalledWith(
       'instancia-teste',
       '120363427851443399@g.us',
-      'Resposta'
+      expect.stringContaining('📊 *Resultado do Desafio #1*')
     );
+    expect(challengeRepo.markBonus).toHaveBeenCalledWith('answer-1', expect.stringMatching(/^SPARK-BONUS-/));
     expect(messaging.enviarDM).not.toHaveBeenCalled();
   });
 
   it('entrega chave no grupo Spark sem tentar DM para participante @lid', async () => {
+    repo.get.mockResolvedValue({
+      jid: '137018214461678@lid',
+      pushName: 'Teste',
+      segmento: 'B',
+      hasExistingKey: true,
+      temChave: false,
+      usageLevel: 'unknown',
+      pendingFlow: null,
+    });
+    repo.ensure.mockImplementation(async (jid: string, pushName: string, segmento: string) => ({
+      jid,
+      pushName,
+      segmento,
+      hasExistingKey: true,
+      temChave: false,
+      usageLevel: 'unknown',
+      pendingFlow: null,
+    }));
+
     await sparkCommunityOrchestrator.onMessage(
       groupPayload('120363427851443399@g.us', '137018214461678@lid', 'preciso da chave'),
       'preciso da chave'
@@ -236,9 +306,34 @@ describe('SparkCommunityOrchestrator', () => {
     expect(messaging.enviarGrupo).toHaveBeenCalledWith(
       'instancia-teste',
       '120363427851443399@g.us',
-      expect.stringContaining('Chave: *SPARK-TRIAL*')
+      expect.stringContaining('🔑 Sua chave de acesso')
     );
     expect(repo.markKeyDelivered).toHaveBeenCalledWith('137018214461678@lid');
     expect(messaging.enviarDM).not.toHaveBeenCalled();
+  });
+
+  it('novo membro no grupo recebe pergunta inicial antes de receber chave', async () => {
+    repo.ensure.mockImplementation(async (jid: string, pushName: string, segmento: string) => ({
+      jid,
+      pushName,
+      segmento,
+      temChave: false,
+      usageLevel: 'unknown',
+      pendingFlow: null,
+    }));
+
+    await sparkCommunityOrchestrator.onMessage(
+      groupPayload('120363427851443399@g.us', '137018214461678@lid', 'oi'),
+      'oi'
+    );
+
+    expect(repo.save).toHaveBeenCalledWith('137018214461678@lid', { pendingFlow: 'ask_existing_key' });
+    expect(messaging.enviarGrupoComMencao).toHaveBeenCalledWith(
+      'instancia-teste',
+      '120363427851443399@g.us',
+      expect.stringContaining('Você já tem sua chave de acesso ao app?'),
+      '137018214461678@lid'
+    );
+    expect(repo.markKeyDelivered).not.toHaveBeenCalled();
   });
 });
